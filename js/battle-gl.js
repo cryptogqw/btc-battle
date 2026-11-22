@@ -1,16 +1,16 @@
 // 战场动画 WebGL 版（PixiJS）：模拟逻辑完全沿用 battle.js 的 Battle（前线、兵力、炮弹、爆炸都由行情驱动），这里只负责绘制。绘制。
 // 奇幻战场：人族（蓝金，左）对兽族（红黑，右），步兵/弓兵/骑兵由 3D 模型渲染的精灵图，背景见 fantasy-art.js。
 // PixiJS 按需动态加载；加载失败、WebGL 不可用或显卡上下文丢失时自动退回经典 Canvas 2D 版；?fx=classic 强制经典版。
-import { Battle, COL, colOf, clamp, lerp, rand, TAU, makeGlow, makeSmoke } from './battle.js?v=6f65a61e';
-import { t as tr } from './i18n.js?v=6f65a61e';
-import { drawSkyGround, drawFarLayer, drawNearLayer, drawForeground, towerTex } from './fantasy-art.js?v=6f65a61e';
+import { Battle, COL, colOf, clamp, lerp, rand, TAU, makeGlow, makeSmoke } from './battle.js?v=473ff2b7';
+import { t as tr } from './i18n.js?v=473ff2b7';
+import { drawSkyGround, drawFarLayer, drawNearLayer, drawForeground, towerTex } from './fantasy-art.js?v=473ff2b7';
 
 const ASSET_V = '3';
 // 手绘（ChatGPT）新素材：覆盖对应阵营的兵种；ONLY 表示该阵营暂时只显示这个兵种（其余兵种的新素材画好前，避免两种画风混在一起）
 const EXTRA = { blue: ['human_inf', 'human_arc', 'human_cav'], red: [] };
 const ONLY = {}; // 军队贴图版本号（更新 assets/units 后加一）
 const UNIT_K = 0.42; // 精灵像素 → 战场单位（sc=1 时）
-const PIXI_URL = './vendor/pixi.js?v=6f65a61e';
+const PIXI_URL = './vendor/pixi.js?v=473ff2b7';
 
 // ---------- 小工具 ----------
 function rng32(seed) { // 固定种子随机数：同一屏幕尺寸下背景每次生成都一样，窗口缩放时不会“换一座城”
@@ -200,17 +200,18 @@ export class GLBattle extends Battle {
     const s = this.soldiers[this.soldiers.length - 1];
     if (this._ut(s) === 'arc') { s.hold = s.ranged = true; s.d = Math.max(s.d, 0.55); }
   }
+  get us() { return clamp((this.W || 820) / 820, 0.62, 1); } // 单位整体缩放（窄屏缩小）
   // 兵种：后排弓兵，前排剑盾步兵，少量骑兵（纯视觉分配，不影响战力计算）
   _ut(s) { if (this.units && ONLY[s.side]) return (s.ut = ONLY[s.side]); if (!s.ut) s.ut = Math.random() < 0.14 ? 'cav' : (s.d > 0.5 ? 'arc' : 'inf'); return s.ut; }
   // 弓兵射箭（抛物线）；步兵、骑兵近身劈砍（不画弹道，只在交锋处溅火花）
   _shoot(s) {
     if (!this.gl || !this.units) return super._shoot(s);
-    const A = this.units[s.side], ut = this._ut(s), sc = this.scaleAt(s.y), dir = s.side === 'blue' ? 1 : -1, k = UNIT_K * sc;
+    const A = this.units[s.side], ut = this._ut(s), sc = this.scaleAt(s.y) * this.us, dir = s.side === 'blue' ? 1 : -1;
     const ty = clamp(s.y + rand(-30, 30), this.laneTop, this.laneBot);
     let sx, sy, tx;
     if (ut === 'arc') {
       const U = A.units.arc, pts = U.clips.shoot.pt || [], m = pts[Math.min(2, pts.length - 1)] || [U.anchorPx + 30, A.meta.foot_y - 70];
-      sx = s.x + dir * (m[0] - U.anchorPx) * k; sy = s.y + (m[1] - A.meta.foot_y) * k;
+      const k = (U.k || UNIT_K) * sc; sx = s.x + dir * (m[0] - U.anchorPx) * k; sy = s.y + (m[1] - (U.footY || A.meta.foot_y)) * k;
       const fxT = this.frontX(ty), deep = Math.abs((s.side === 'blue' ? this.baseR : this.baseL) - fxT);
       tx = fxT + dir * rand(20, Math.max(140, deep * 0.85));
       this._melee = false;
@@ -421,8 +422,8 @@ export class GLBattle extends Battle {
         else if (C.defend && Math.abs(s.x - this.frontX(s.y)) < 70) { clip = C.defend; fi = Math.min(clip.n - 1, 2 + (((this.t * 1.5 + s.phase) | 0) % 2)); }
         else { clip = C.idle || C.walk; fi = ((this.t * 6 + s.phase) | 0) % clip.n; }
         const big = ut === 'cav' ? 2.2 : 1;
-        const sh = pl.shadows.get(); sh.position.set(s.x - face * 2 * sc, s.y); sh.width = (s.dead ? 44 : 28) * sc * big; sh.height = 7 * sc * (ut === 'cav' ? 1.5 : 1); sh.alpha = fade * 0.9;
-        const K = (U.k || UNIT_K) * sc, bob = (s.moving && !s.dead && U.k && ut === 'inf') ? Math.abs(Math.sin(s.phase)) * 1.2 * sc : 0;
+        const us = this.us; const sh = pl.shadows.get(); sh.position.set(s.x - face * 2 * sc * us, s.y); sh.width = (s.dead ? 44 : 28) * sc * big * us; sh.height = 7 * sc * us * (ut === 'cav' ? 1.5 : 1); sh.alpha = fade * 0.9;
+        const K = (U.k || UNIT_K) * sc * us, bob = (s.moving && !s.dead && U.k && ut === 'inf') ? Math.abs(Math.sin(s.phase)) * 1.2 * sc * us : 0;
         const u = pl.soldiers.get(clip.tex[fi]); u.anchor.set(U.ax, U.ay);
         u.position.set(s.x, s.y - bob); u.scale.set(K * face, K); u.alpha = fade;
         const depth = clamp((s.y - this.laneTop) / (this.laneBot - this.laneTop), 0, 1);
