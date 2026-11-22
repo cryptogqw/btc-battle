@@ -1,0 +1,1 @@
+{"cell": [295, 168], "foot_y": 158.0, "units": {"cav": {"anchor_x": 112.5, "k": 0.4744, "clips": {"walk": {"row": 0, "n": 6, "loop": true, "dur": 0.5}, "attack": {"row": 1, "n": 6, "loop": false, "dur": 0.63}, "death": {"row": 2, "n": 6, "loop": false, "dur": 0.935}}}}, "size": [1770, 504]}

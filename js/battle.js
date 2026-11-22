@@ -1,5 +1,5 @@
 // 战场动画：Canvas 2D，蓝军（多）在左，红军（空）在右
-import { t as tr, fmtUsd } from './i18n.js?v=d07538c8';
+import { t as tr, fmtUsd } from './i18n.js?v=6f65a61e';
 const TAU = Math.PI * 2;
 const rand = (a, b) => a + Math.random() * (b - a);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -386,17 +386,22 @@ export class Battle {
       }
       const blue = s.side === 'blue', dir = blue ? 1 : -1;
       const fx = this.frontX(s.y), base = blue ? this.baseL : this.baseR;
-      const surging = this.surge === s.side;
+      const surging = this.surge === s.side && !s.hold; // 弓兵（hold）不参与冲锋
       const depth = surging ? s.d * 0.35 : s.d;
       let tx = fx - dir * (12 + depth * Math.abs(fx - base) * 0.82);
       if (surging) tx += dir * 10 * Math.sin(this.t * 3 + s.phase);
-      const dx = tx - s.x, sp = s.speed * (surging ? 2.2 : 1) * (Math.abs(dx) > 80 ? 1.6 : 1);
+      const dx = tx - s.x, sp = s.speed * (surging ? 2.2 : 1) * (Math.abs(dx) > 80 ? 1.6 : 1) * (s.ranged && dx * dir < 0 ? 0.45 : 1); // 弓兵后撤慢
       s.moving = Math.abs(dx) > 3;
       s.x += clamp(dx, -sp * dt, sp * dt);
       s.phase += dt * (s.moving ? 11 : 2.5) * (surging ? 1.4 : 1);
       s.facing = s.moving ? Math.sign(dx) : dir;
       if (s.recoil) s.recoil = Math.max(0, s.recoil - dt);
-      const nearFront = Math.abs(s.x - fx) < 70;
+      if (s.ranged && (fx - s.x) * dir < 10) { // 敌军冲到弓兵阵中：弓兵被击倒
+        s.dead = true; s.dieT = 0; s.vx = -dir * rand(20, 50); s.vy = -rand(30, 70);
+        this.parts.push({ type: 'glow', spr: blue ? 'red' : 'blue', x: s.x, y: s.y - 12, vx: 0, vy: 0, life: 0.2, max: 0.2, size: 26, add: true });
+        continue;
+      }
+      const nearFront = Math.abs(s.x - fx) < 70 || s.ranged; // 弓兵在后排也持续放箭
       // 待机射击频率 ∝ 该方近 10 秒真实主动成交额；无成交时几乎不开火
       s.cool -= dt * (this.activity[s.side] || 0);
       if (!nearFront && s.cool < 0) s.cool = 0;
