@@ -1,13 +1,16 @@
 // 战场动画 WebGL 版（PixiJS）：模拟逻辑完全沿用 battle.js 的 Battle（前线、兵力、炮弹、爆炸都由行情驱动），这里只负责绘制。绘制。
 // 奇幻战场：人族（蓝金，左）对兽族（红黑，右），步兵/弓兵/骑兵由 3D 模型渲染的精灵图，背景见 fantasy-art.js。
 // PixiJS 按需动态加载；加载失败、WebGL 不可用或显卡上下文丢失时自动退回经典 Canvas 2D 版；?fx=classic 强制经典版。
-import { Battle, COL, colOf, clamp, lerp, rand, TAU, makeGlow, makeSmoke } from './battle.js?v=8fd42069';
-import { t as tr } from './i18n.js?v=8fd42069';
-import { drawSkyGround, drawFarLayer, drawNearLayer, drawForeground, towerTex } from './fantasy-art.js?v=8fd42069';
+import { Battle, COL, colOf, clamp, lerp, rand, TAU, makeGlow, makeSmoke } from './battle.js?v=43d6fa62';
+import { t as tr } from './i18n.js?v=43d6fa62';
+import { drawSkyGround, drawFarLayer, drawNearLayer, drawForeground, towerTex } from './fantasy-art.js?v=43d6fa62';
 
-const ASSET_V = '2'; // 军队贴图版本号（更新 assets/units 后加一）
+const ASSET_V = '3';
+// 手绘（ChatGPT）新素材：覆盖对应阵营的兵种；ONLY 表示该阵营暂时只显示这个兵种（其余兵种的新素材画好前，避免两种画风混在一起）
+const EXTRA = { blue: ['human_inf'], red: [] };
+const ONLY = { blue: 'inf' }; // 军队贴图版本号（更新 assets/units 后加一）
 const UNIT_K = 0.42; // 精灵像素 → 战场单位（sc=1 时）
-const PIXI_URL = './vendor/pixi.js?v=8fd42069';
+const PIXI_URL = './vendor/pixi.js?v=43d6fa62';
 
 // ---------- 小工具 ----------
 function rng32(seed) { // 固定种子随机数：同一屏幕尺寸下背景每次生成都一样，窗口缩放时不会“换一座城”
@@ -174,14 +177,26 @@ export class GLBattle extends Battle {
       for (const [u, ud] of Object.entries(meta.units)) {
         const clips = {};
         for (const [k, c] of Object.entries(ud.clips)) clips[k] = { ...c, tex: Array.from({ length: c.n }, (_, i) => new P.Texture({ source, frame: new P.Rectangle(i * cw, c.row * ch, cw, ch) })) };
-        units[u] = { clips, ax: ud.anchor_x / cw, ay: meta.foot_y / ch, anchorPx: ud.anchor_x };
+        units[u] = { clips, ax: ud.anchor_x / cw, ay: meta.foot_y / ch, anchorPx: ud.anchor_x, k: ud.k, footY: meta.foot_y };
+      }
+      for (const extra of EXTRA[side]) {
+        try {
+          const em = await fetch(`${base}${extra}.json?v=${ASSET_V}`).then((r) => r.json());
+          let ei; try { ei = await img(`${base}${extra}.avif?v=${ASSET_V}`); } catch { ei = await img(`${base}${extra}.png?v=${ASSET_V}`); }
+          const es = P.Texture.from(ei, true).source; const [ew, eh] = em.cell;
+          for (const [u, ud] of Object.entries(em.units)) {
+            const clips = {};
+            for (const [k, c] of Object.entries(ud.clips)) clips[k] = { ...c, tex: Array.from({ length: c.n }, (_, i) => new P.Texture({ source: es, frame: new P.Rectangle(i * ew, c.row * eh, ew, eh) })) };
+            units[u] = { clips, ax: ud.anchor_x / ew, ay: em.foot_y / eh, anchorPx: ud.anchor_x, k: ud.k, footY: em.foot_y };
+          }
+        } catch (e) { console.warn('新素材加载失败', extra, e); }
       }
       armies[side] = { meta, units };
     }
     if (this.gl) this.units = armies;
   }
   // 兵种：后排弓兵，前排剑盾步兵，少量骑兵（纯视觉分配，不影响战力计算）
-  _ut(s) { if (!s.ut) s.ut = Math.random() < 0.14 ? 'cav' : (s.d > 0.5 ? 'arc' : 'inf'); return s.ut; }
+  _ut(s) { if (this.units && ONLY[s.side]) return (s.ut = ONLY[s.side]); if (!s.ut) s.ut = Math.random() < 0.14 ? 'cav' : (s.d > 0.5 ? 'arc' : 'inf'); return s.ut; }
   // 弓兵射箭（抛物线）；步兵、骑兵近身劈砍（不画弹道，只在交锋处溅火花）
   _shoot(s) {
     if (!this.gl || !this.units) return super._shoot(s);
@@ -194,7 +209,7 @@ export class GLBattle extends Battle {
       tx = this.frontX(ty) + dir * rand(20, 140);
       this._melee = false;
     } else {
-      sx = s.x + dir * 18 * sc; sy = s.y - 34 * sc; tx = this.frontX(ty) + dir * rand(5, 40); this._melee = true;
+      sx = s.x + dir * 18 * sc; sy = s.y - 30 * sc; tx = this.frontX(ty) + dir * rand(5, 40); this._melee = true;
     }
     this._bullet(s.side, sx, sy, tx, ty - 18 * this.scaleAt(ty));
     this._melee = false;
@@ -397,11 +412,13 @@ export class GLBattle extends Battle {
         if (s.dead) { clip = C.death; fi = Math.min(clip.n - 1, (s.dieT / 1.1 * clip.n) | 0); }
         else if (atk < 0.5 && (C.attack || C.shoot)) { clip = C.attack || C.shoot; fi = Math.min(clip.n - 1, (atk / 0.5 * clip.n) | 0); }
         else if (s.moving || ut === 'cav') { clip = (this.surge === s.side && C.run) ? C.run : C.walk; fi = s.moving ? ((((s.phase % TAU) + TAU) % TAU) / TAU * clip.n) | 0 : 0; }
+        else if (C.defend && Math.abs(s.x - this.frontX(s.y)) < 70) { clip = C.defend; fi = Math.min(clip.n - 1, 2 + (((this.t * 1.5 + s.phase) | 0) % 2)); }
         else { clip = C.idle || C.walk; fi = ((this.t * 6 + s.phase) | 0) % clip.n; }
         const big = ut === 'cav' ? 2.2 : 1;
         const sh = pl.shadows.get(); sh.position.set(s.x - face * 2 * sc, s.y); sh.width = (s.dead ? 44 : 28) * sc * big; sh.height = 7 * sc * (ut === 'cav' ? 1.5 : 1); sh.alpha = fade * 0.9;
+        const K = (U.k || UNIT_K) * sc, bob = (s.moving && !s.dead && U.k) ? Math.abs(Math.sin(s.phase)) * 1.2 * sc : 0;
         const u = pl.soldiers.get(clip.tex[fi]); u.anchor.set(U.ax, U.ay);
-        u.position.set(s.x, s.y); u.scale.set(UNIT_K * sc * face, UNIT_K * sc); u.alpha = fade;
+        u.position.set(s.x, s.y - bob); u.scale.set(K * face, K); u.alpha = fade;
         const depth = clamp((s.y - this.laneTop) / (this.laneBot - this.laneTop), 0, 1);
         u.tint = mixNum(0xb4b8c6, 0xffffff, depth); // 远处稍暗，增加纵深
       } else {

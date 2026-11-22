@@ -1,9 +1,9 @@
-import { FeedManager, SOURCES, fetchMiniTickers, fetchBinance1s, fetchBinanceAggTrades } from './feeds.js?v=8fd42069';
-import { PRESET, universe, loadUniverse, loadTickers, fetchQuoteVolume, thresholdsFor, search as searchCoins, topByVolume, recents, pushRecent, favorites, toggleFav, primarySource } from './markets.js?v=8fd42069';
-import { GLBattle } from './battle-gl.js?v=8fd42069';
-import { t as T, lang, setLang, onLang, applyI18n, fmtUsd, fmtShort, fmtNum } from './i18n.js?v=8fd42069';
-import { AudioController } from './music.js?v=8fd42069';
-import { initChat } from './chat.js?v=8fd42069';
+import { FeedManager, SOURCES, fetchMiniTickers, fetchBinance1s, fetchBinanceAggTrades } from './feeds.js?v=43d6fa62';
+import { PRESET, universe, loadUniverse, loadTickers, fetchQuoteVolume, thresholdsFor, search as searchCoins, topByVolume, recents, pushRecent, favorites, toggleFav, primarySource } from './markets.js?v=43d6fa62';
+import { GLBattle } from './battle-gl.js?v=43d6fa62';
+import { t as T, lang, setLang, onLang, applyI18n, fmtUsd, fmtShort, fmtNum } from './i18n.js?v=43d6fa62';
+import { AudioController } from './music.js?v=43d6fa62';
+import { initChat } from './chat.js?v=43d6fa62';
 
 const $ = (id) => document.getElementById(id);
 const pad = (n) => String(n).padStart(2, '0');

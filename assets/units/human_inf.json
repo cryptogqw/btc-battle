@@ -1,0 +1,1 @@
+{"cell": [360, 240], "foot_y": 230, "units": {"inf": {"anchor_x": 150, "k": 0.22, "clips": {"idle": {"row": 0, "n": 1, "loop": true}, "walk": {"row": 1, "n": 8, "loop": true}, "attack": {"row": 2, "n": 6, "loop": false}, "defend": {"row": 3, "n": 6, "loop": false}, "death": {"row": 4, "n": 6, "loop": false}}}}, "size": [2880, 1200]}
