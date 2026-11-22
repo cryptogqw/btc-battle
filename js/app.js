@@ -1,9 +1,9 @@
-import { FeedManager, SOURCES, fetchMiniTickers, fetchBinance1s, fetchBinanceAggTrades } from './feeds.js?v=26008e6a';
-import { PRESET, universe, loadUniverse, loadTickers, fetchQuoteVolume, thresholdsFor, search as searchCoins, topByVolume, recents, pushRecent, favorites, toggleFav, primarySource } from './markets.js?v=26008e6a';
-import { Battle } from './battle.js?v=26008e6a';
-import { t as T, lang, setLang, onLang, applyI18n, fmtUsd, fmtShort, fmtNum } from './i18n.js?v=26008e6a';
-import { AudioController } from './music.js?v=26008e6a';
-import { initChat } from './chat.js?v=26008e6a';
+import { FeedManager, SOURCES, fetchMiniTickers, fetchBinance1s, fetchBinanceAggTrades } from './feeds.js?v=e9302408';
+import { PRESET, universe, loadUniverse, loadTickers, fetchQuoteVolume, thresholdsFor, search as searchCoins, topByVolume, recents, pushRecent, favorites, toggleFav, primarySource } from './markets.js?v=e9302408';
+import { GLBattle } from './battle-gl.js?v=e9302408';
+import { t as T, lang, setLang, onLang, applyI18n, fmtUsd, fmtShort, fmtNum } from './i18n.js?v=e9302408';
+import { AudioController } from './music.js?v=e9302408';
+import { initChat } from './chat.js?v=e9302408';
 
 const $ = (id) => document.getElementById(id);
 const pad = (n) => String(n).padStart(2, '0');
@@ -48,7 +48,7 @@ introStep(15, 'introGather');
 setTimeout(finishIntro, 7000); // 最长等待
 
 // ---------- 战场 ----------
-const battle = new Battle($('battle'));
+const battle = new GLBattle($('battle')); // WebGL 现代战场；不支持时自动退回经典版（?fx=classic 强制经典版）
 battle.start();
 window.__battle = battle; // 调试用
 window.__cw = () => S.dbg;

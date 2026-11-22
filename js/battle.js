@@ -1,5 +1,5 @@
 // 战场动画：Canvas 2D，蓝军（多）在左，红军（空）在右
-import { t as tr, fmtUsd } from './i18n.js?v=26008e6a';
+import { t as tr, fmtUsd } from './i18n.js?v=e9302408';
 const TAU = Math.PI * 2;
 const rand = (a, b) => a + Math.random() * (b - a);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -64,17 +64,21 @@ export class Battle {
 
   // ---------- 布局 ----------
   resize() {
-    const r = this.cv.getBoundingClientRect();
+    const r = (this.sizeEl || this.cv).getBoundingClientRect();
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     if (!r.width || !r.height) return;
     this.W = r.width; this.H = r.height; this.dpr = dpr;
-    this.cv.width = Math.round(r.width * dpr); this.cv.height = Math.round(r.height * dpr);
+    if (!this.sizeEl) { this.cv.width = Math.round(r.width * dpr); this.cv.height = Math.round(r.height * dpr); }
     const oT = this.laneTop, oB = this.laneBot, oW = this.W0;
     this.horizon = this.H * 0.4; this.laneTop = this.H * 0.52; this.laneBot = this.H * 0.93;
     if (oT != null && oB > oT) for (const s of this.soldiers) { s.y = this.laneTop + (s.y - oT) / (oB - oT) * (this.laneBot - this.laneTop); if (oW) s.x *= this.W / oW; }
     this.W0 = this.W;
     this.baseL = Math.max(34, this.W * 0.055); this.baseR = this.W - this.baseL;
     this.N = Math.round(clamp(this.W / 16, 22, 70));
+    this._buildArt();
+  }
+  // 经典 Canvas 2D 版的预渲染图层（WebGL 版会覆盖这个方法）
+  _buildArt() {
     this._bg = this._renderBg();
     const strip = (c0, c1) => { const c = document.createElement('canvas'); c.width = 128; c.height = 1; const x = c.getContext('2d');
       const g = x.createLinearGradient(0, 0, 128, 0); g.addColorStop(0, c0); g.addColorStop(1, c1); x.fillStyle = g; x.fillRect(0, 0, 128, 1); return c; };
@@ -702,4 +706,4 @@ export class Battle {
   }
 }
 
-export { fmtUsd };
+export { fmtUsd, COL, colOf, clamp, lerp, rand, TAU, RM, makeGlow, makeSmoke, makeCloud };

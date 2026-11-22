@@ -9,6 +9,13 @@ BTC、ETH 及 Binance / OKX / Coinbase 上 900+ 币种的实时价格 + 多空�
 
 纯静态网页（HTML/CSS/JS ES Modules，无构建步骤），部署在 GitHub Pages。
 
+### 战场渲染（WebGL 现代战场）
+
+- 默认使用 PixiJS（WebGL）渲染现代战场：废墟城市天际线、高压电塔、远处火光与炮口闪光、焦土与残骸、碉堡与探照灯、沙袋/铁丝网前景；硝烟浓度与天空火光随交战强度、总攻变化。
+- 模拟逻辑（前线、兵力、炮弹、爆炸）仍在 `js/battle.js`，WebGL 绘制在 `js/battle-gl.js`，两版看到的是同一场战斗。
+- 加 `?fx=classic` 使用经典 Canvas 2D 版；WebGL 不可用或显卡上下文丢失时也会自动退回经典版。
+- PixiJS 已打包在 `js/vendor/pixi.js`（按需动态加载，约 170KB gzip），重新打包运行 `./tools/build-pixi.sh`。
+
 > 仅供娱乐参考，不构成投资建议。
 
 作者：大橙子 (Big Orange) · X [@0xVeryBigOrange](https://x.com/0xVeryBigOrange)

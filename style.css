@@ -158,7 +158,7 @@ select option{background:#0f172a}
 #basis b{font-family:var(--mono)}
 
 .battle-card{grid-area:battle;padding:0;overflow:hidden;height:clamp(320px,52vh,580px)}
-#battle{display:block;width:100%;height:100%}
+#battle,.battle-gl{display:block;width:100%;height:100%}
 .hud-l,.hud-r{position:absolute;top:12px;font-weight:800;font-size:13px;display:flex;align-items:center;gap:8px;text-shadow:0 2px 8px #000;pointer-events:none;padding:5px 10px 5px 5px;border-radius:10px;background:rgba(5,8,18,.45);backdrop-filter:blur(4px)}
 .hud-l{left:12px;color:#bfdbfe}.hud-r{right:12px;color:#fecaca;padding:5px 5px 5px 10px}
 .flag{display:inline-grid;place-items:center;width:26px;height:26px;border-radius:7px;font-weight:900;color:#fff}
