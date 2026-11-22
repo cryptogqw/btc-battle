@@ -1,9 +1,9 @@
-import { FeedManager, SOURCES, fetchMiniTickers, fetchBinance1s, fetchBinanceAggTrades } from './feeds.js?v=43d6fa62';
-import { PRESET, universe, loadUniverse, loadTickers, fetchQuoteVolume, thresholdsFor, search as searchCoins, topByVolume, recents, pushRecent, favorites, toggleFav, primarySource } from './markets.js?v=43d6fa62';
-import { GLBattle } from './battle-gl.js?v=43d6fa62';
-import { t as T, lang, setLang, onLang, applyI18n, fmtUsd, fmtShort, fmtNum } from './i18n.js?v=43d6fa62';
-import { AudioController } from './music.js?v=43d6fa62';
-import { initChat } from './chat.js?v=43d6fa62';
+import { FeedManager, SOURCES, fetchMiniTickers, fetchBinance1s, fetchBinanceAggTrades } from './feeds.js?v=d07538c8';
+import { PRESET, universe, loadUniverse, loadTickers, fetchQuoteVolume, thresholdsFor, search as searchCoins, topByVolume, recents, pushRecent, favorites, toggleFav, primarySource } from './markets.js?v=d07538c8';
+import { GLBattle } from './battle-gl.js?v=d07538c8';
+import { t as T, lang, setLang, onLang, applyI18n, fmtUsd, fmtShort, fmtNum } from './i18n.js?v=d07538c8';
+import { AudioController } from './music.js?v=d07538c8';
+import { initChat } from './chat.js?v=d07538c8';
 
 const $ = (id) => document.getElementById(id);
 const pad = (n) => String(n).padStart(2, '0');
@@ -561,7 +561,10 @@ setInterval(refresh, 400);
 const audio = new AudioController();
 window.__audio = audio; // 调试用
 const AKEY = 'cw_audio2'; // v2：默认开启（忽略旧版“默认关闭”时存下的设置）
-const AP = Object.assign({ music: true, sfx: true, vol: 75 }, JSON.parse(localStorage.getItem(AKEY) || '{}'));
+const AP = Object.assign({ music: true, sfx: true, vol: 75, muted: false }, JSON.parse(localStorage.getItem(AKEY) || '{}'));
+// 一键静音：只压住输出，不改动音乐/音效各自的开关，取消静音后恢复原设置
+const aMusic = () => AP.music && !AP.muted, aSfx = () => AP.sfx && !AP.muted;
+const sndTog = $('sndTog');
 const audioBtn = $('audioBtn'), pop = $('audioPop'), mInd = $('musicInd');
 $('musicTog').checked = AP.music; $('sfxTog').checked = AP.sfx; $('volRange').value = AP.vol;
 function moodLabel() {
@@ -569,30 +572,31 @@ function moodLabel() {
   return musicMood > 0.15 ? T('mUp') : musicMood < -0.15 ? T('mDown') : T('mTie');
 }
 function updateMusicInd() {
-  const want = AP.music || AP.sfx, locked = audio.locked;
+  const want = aMusic() || aSfx(), locked = audio.locked;
   audioBtn.textContent = !want ? '🔇' : AP.music ? '🎵' : '🔊';
+  if (sndTog) { sndTog.textContent = AP.muted ? T('sndOff') : T('sndOn'); sndTog.classList.toggle('off', AP.muted); sndTog.setAttribute('aria-pressed', String(!AP.muted)); }
   audioBtn.classList.toggle('on', want && audio.running);
   audioBtn.classList.toggle('pending', locked);
   mInd.className = 'music-ind' + (locked ? ' locked' : !want ? ' off' : '') + (!locked && want ? ' ' + (S.surge || (musicMood > 0.15 ? 'blue' : musicMood < -0.15 ? 'red' : '')) : '');
-  mInd.textContent = locked ? T('mLocked') : !want ? T('mOff') : AP.music ? `♪ ${audio.bpm()} BPM · ${moodLabel()}` : `${T('mSfx')} · ${moodLabel()}`;
+  mInd.textContent = locked ? T('mLocked') : !want ? T('mOff') : aMusic() ? `♪ ${audio.bpm()} BPM · ${moodLabel()}` : `${T('mSfx')} · ${moodLabel()}`;
 }
 function saveAudio() {
   localStorage.setItem(AKEY, JSON.stringify(AP));
-  audio.apply({ music: AP.music, sfx: AP.sfx, volume: AP.vol / 100 });
-  if ((AP.music || AP.sfx) && !audio.running) audio.unlock().then(updateMusicInd); // 开关本身就是一次点击
+  audio.apply({ music: aMusic(), sfx: aSfx(), volume: AP.vol / 100 });
+  if ((aMusic() || aSfx()) && !audio.running) audio.unlock().then(updateMusicInd); // 开关本身就是一次点击
   updateMusicInd();
 }
 audio.onstate = updateMusicInd;
-audio.apply({ music: AP.music, sfx: AP.sfx, volume: AP.vol / 100 });
+audio.apply({ music: aMusic(), sfx: aSfx(), volume: AP.vol / 100 });
 // 任意首次交互即解锁（iOS 需在手势回调里同步 resume）
 const GEST = ['pointerdown', 'touchstart', 'touchend', 'mousedown', 'keydown', 'click'];
 function onGesture() {
-  if (!(AP.music || AP.sfx)) return;
+  if (!(aMusic() || aSfx())) return;
   if (!audio.running) audio.unlock().then((ok) => { updateMusicInd(); if (ok) GEST.forEach(ev => document.removeEventListener(ev, onGesture, true)); });
   else GEST.forEach(ev => document.removeEventListener(ev, onGesture, true));
 }
 GEST.forEach(ev => document.addEventListener(ev, onGesture, true));
-if (AP.music || AP.sfx) audio.tryAutoStart().then(updateMusicInd);
+if (aMusic() || aSfx()) audio.tryAutoStart().then(updateMusicInd);
 // 开场“点击进入战场”
 $('introGo').onclick = (e) => { e.stopPropagation(); onGesture(); closeIntro(); };
 intro.addEventListener('click', () => { if (intro.classList.contains('ready')) { onGesture(); closeIntro(); } });
@@ -600,8 +604,18 @@ document.addEventListener('keydown', (e) => { if (intro.classList.contains('read
 mInd.onclick = (e) => { e.stopPropagation(); if (audio.locked) onGesture(); else pop.hidden = !pop.hidden; };
 audioBtn.onclick = (e) => { e.stopPropagation(); pop.hidden = !pop.hidden; };
 document.addEventListener('click', (e) => { if (!pop.hidden && !e.target.closest('.audio-wrap')) pop.hidden = true; });
-$('musicTog').onchange = (e) => { AP.music = e.target.checked; saveAudio(); };
-$('sfxTog').onchange = (e) => { AP.sfx = e.target.checked; saveAudio(); };
+$('musicTog').onchange = (e) => { AP.music = e.target.checked; if (AP.music) AP.muted = false; saveAudio(); };
+$('sfxTog').onchange = (e) => { AP.sfx = e.target.checked; if (AP.sfx) AP.muted = false; saveAudio(); };
+// 战场画面上的一键静音按钮 + 快捷键 M
+function toggleMute() {
+  if (AP.muted || !(AP.music || AP.sfx)) { AP.muted = false; if (!AP.music && !AP.sfx) { AP.music = AP.sfx = true; $('musicTog').checked = $('sfxTog').checked = true; } }
+  else AP.muted = true;
+  saveAudio();
+}
+if (sndTog) sndTog.onclick = (e) => { e.stopPropagation(); toggleMute(); };
+document.addEventListener('keydown', (e) => {
+  if ((e.key === 'm' || e.key === 'M') && !e.metaKey && !e.ctrlKey && !e.altKey && !(e.target.closest && e.target.closest('input, textarea, select, [contenteditable]'))) toggleMute();
+});
 $('volRange').oninput = (e) => { AP.vol = +e.target.value; saveAudio(); };
 updateMusicInd();
 
