@@ -13,6 +13,8 @@ BTC、ETH 及 Binance / OKX / Coinbase 上 900+ 币种的实时价格 + 多空�
 
 作者：大橙子 (Big Orange) · X [@0xVeryBigOrange](https://x.com/0xVeryBigOrange)
 
+> 本仓库 fork 自 [0xVeryBigOrange/btc-battle](https://github.com/0xVeryBigOrange/btc-battle)，部署地址：https://cryptogqw.github.io/btc-battle/ 。同步上游：`git fetch upstream && git merge upstream/main`。
+
 ## 战力模型（全部来自实时行情）
 
 前线位置 = 价格涨跌 50%（10 秒 25% + 1 分钟 25%）+ 吃单 30%（10 秒 15% + 1 分钟 15%）+ ±0.5% 挂单厚度 20%。
