@@ -1,10 +1,12 @@
 // 战场动画 WebGL 版（PixiJS）：模拟逻辑完全沿用 battle.js 的 Battle（前线、兵力、炮弹、爆炸都由行情驱动），这里只负责绘制。
 // 现代战场场景：废墟城市天际线、电塔、远处火光与炮口闪光、焦土地面与残骸、碉堡、探照灯、沙袋与铁丝网前景。
 // PixiJS 按需动态加载；加载失败、WebGL 不可用或显卡上下文丢失时自动退回经典 Canvas 2D 版；?fx=classic 强制经典版。
-import { Battle, COL, colOf, clamp, lerp, rand, TAU, makeGlow, makeSmoke } from './battle.js?v=e9302408';
-import { t as tr } from './i18n.js?v=e9302408';
+import { Battle, COL, colOf, clamp, lerp, rand, TAU, makeGlow, makeSmoke } from './battle.js?v=dd45ca2d';
+import { t as tr } from './i18n.js?v=dd45ca2d';
 
-const PIXI_URL = './vendor/pixi.js?v=e9302408';
+const ASSET_V = '1'; // 写实单位贴图版本号（更新 assets/units 后加一）
+const UNIT_K = 0.37; // 精灵像素 → 战场单位（sc=1 时）
+const PIXI_URL = './vendor/pixi.js?v=dd45ca2d';
 
 // ---------- 小工具 ----------
 function rng32(seed) { // 固定种子随机数：同一屏幕尺寸下背景每次生成都一样，窗口缩放时不会“换一座城”
@@ -269,8 +271,35 @@ export class GLBattle extends Battle {
     this._buildScene();
     this.cv.style.display = 'none'; this.sizeEl = glc;
     this.gl = true;
+    this._loadUnits().catch((e) => console.warn('写实单位贴图加载失败，沿用简笔士兵', e));
     if (window.ResizeObserver) new ResizeObserver(() => this.gl && this.resize()).observe(glc);
     this.resize();
+  }
+  async _loadUnits() {
+    const P = this.P, base = './assets/units/';
+    const img = (src) => new Promise((res, rej) => { const im = new Image(); im.decoding = 'async'; im.onload = () => (im.naturalWidth ? res(im) : rej(new Error('empty'))); im.onerror = rej; im.src = src; });
+    const units = {};
+    for (const side of ['blue', 'red']) {
+      const meta = await fetch(`${base}soldier_${side}.json?v=${ASSET_V}`).then((r) => r.json());
+      let im; try { im = await img(`${base}soldier_${side}.avif?v=${ASSET_V}`); } catch { im = await img(`${base}soldier_${side}.png?v=${ASSET_V}`); }
+      const source = P.Texture.from(im, true).source; const [cw, ch] = meta.cell; const clips = {};
+      for (const [k, c] of Object.entries(meta.clips)) clips[k] = { ...c, tex: Array.from({ length: c.n }, (_, i) => new P.Texture({ source, frame: new P.Rectangle(i * cw, c.row * ch, cw, ch) })) };
+      units[side] = { meta, clips, ax: meta.foot[0] / cw, ay: meta.foot[1] / ch };
+    }
+    if (this.gl) this.units = units;
+  }
+  // 写实士兵：子弹与枪口火光从贴图里步枪枪口的位置射出
+  _shoot(s) {
+    if (!this.gl || !this.units) return super._shoot(s);
+    const U = this.units[s.side], sc = this.scaleAt(s.y), dir = s.side === 'blue' ? 1 : -1, k = UNIT_K * sc;
+    if (s.crouch === undefined) s.crouch = Math.random() < 0.35;
+    const m = (s.crouch ? U.clips.crouch : U.clips.shoot).muzzle[0] || [U.meta.foot[0] + 30, U.meta.foot[1] - 80];
+    const sx = s.x + dir * (m[0] - U.meta.foot[0]) * k, sy = s.y + (m[1] - U.meta.foot[1]) * k;
+    const ty = clamp(s.y + rand(-30, 30), this.laneTop, this.laneBot);
+    const tx = this.frontX(ty) + dir * rand(15, 120);
+    this._bullet(s.side, sx, sy, tx, ty - 18 * this.scaleAt(ty));
+    this.parts.push({ type: 'glow', spr: 'fire', x: sx, y: sy, vx: 0, vy: 0, life: 0.07, max: 0.07, size: 16 * sc, add: true });
+    s.recoil = 0.12;
   }
   _glFail() {
     this.gl = false;
@@ -497,6 +526,21 @@ export class GLBattle extends Battle {
       const sc = this.scaleAt(s.y), fade = s.dead ? clamp(1 - (s.dieT - 1.2), 0, 1) : 1;
       if (fade <= 0) continue;
       const face = s.facing || (s.side === 'blue' ? 1 : -1);
+      const U = this.units && this.units[s.side];
+      if (U) { // 写实士兵（3D 模型渲染的动作帧）
+        if (s.crouch === undefined) s.crouch = Math.random() < 0.35;
+        let clip, fi;
+        if (s.dead) { clip = U.clips.death; fi = Math.min(clip.n - 1, (s.dieT / 1.1 * clip.n) | 0); }
+        else if (s.recoil > 0.02) { clip = s.crouch ? U.clips.crouch : U.clips.shoot; fi = Math.min(clip.n - 1, ((0.12 - s.recoil) / 0.12 * clip.n) | 0); }
+        else if (s.moving) { clip = this.surge === s.side ? U.clips.run : U.clips.walk; fi = ((((s.phase % TAU) + TAU) % TAU) / TAU * clip.n) | 0; }
+        else { clip = s.crouch ? U.clips.crouch : U.clips.shoot; fi = 0; }
+        const sh = pl.shadows.get(); sh.position.set(s.x - face * 2 * sc, s.y); sh.width = (s.dead ? 40 : 26) * sc; sh.height = 7 * sc; sh.alpha = fade * 0.9;
+        if (!s.dead) { const tg = pl.unitGlow.get(tx[s.side]); tg.position.set(s.x, s.y); tg.width = 30 * sc; tg.height = 8 * sc; tg.alpha = 0.35 + 0.25 * this.surgeT * (this.surge === s.side ? 1 : 0); } // 脚下阵营色光晕
+        const u = pl.soldiers.get(clip.tex[fi]); u.anchor.set(U.ax, U.ay);
+        u.position.set(s.x, s.y); u.scale.set(UNIT_K * sc * face, UNIT_K * sc); u.alpha = fade;
+        const depth = clamp((s.y - this.laneTop) / (this.laneBot - this.laneTop), 0, 1);
+        u.tint = mixNum(0xa4abbd, 0xffffff, depth); // 远处更暗，营造夜战纵深
+      } else {
       const sh = pl.shadows.get(); sh.position.set(s.x, s.y); sh.width = 18 * sc; sh.height = 6 * sc; sh.alpha = fade;
       const fr = tx.soldier[s.side];
       const tex = s.dead ? fr.idle : s.recoil > 0.05 ? fr.shoot : s.moving ? fr.walk[(((s.phase % TAU) + TAU) % TAU / TAU * 8) | 0] : fr.idle;
@@ -504,7 +548,8 @@ export class GLBattle extends Battle {
       const u = pl.soldiers.get(tex); u.anchor.set(SOX / SW, SOY / SH);
       u.position.set(s.x, s.y - bob * sc); u.scale.set(sc * face / SR, sc / SR); u.alpha = fade;
       u.rotation = s.dead ? -face * Math.abs(s.rot) : 0;
-      if (this.surge === s.side && !s.dead) { const g = pl.unitGlow.get(tx[s.side]); g.position.set(s.x, s.y - 12 * sc); g.width = 28 * sc; g.height = 36 * sc; g.alpha = 0.45 * this.surgeT; }
+      }
+      if (!U && this.surge === s.side && !s.dead) { const g = pl.unitGlow.get(tx[s.side]); g.position.set(s.x, s.y - 12 * sc); g.width = 28 * sc; g.height = 36 * sc; g.alpha = 0.45 * this.surgeT; }
     }
     // 硝烟
     for (const m of this.smoke) { const s = pl.smoke.get(); s.position.set(m.x, m.y); s.width = s.height = m.size * 2; s.alpha = Math.min(1, m.life / m.max * 1.4) * 0.8; s.rotation = m.rot; }
