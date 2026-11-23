@@ -1,16 +1,26 @@
 // 战场动画 WebGL 版（PixiJS）：模拟逻辑完全沿用 battle.js 的 Battle（前线、兵力、炮弹、爆炸都由行情驱动），这里只负责绘制。绘制。
-// 奇幻战场：人族（蓝金，左）对兽族（红黑，右），步兵/弓兵/骑兵由 3D 模型渲染的精灵图，背景见 fantasy-art.js。
+// 奇幻战场：人族（蓝金，左）对兽族（红黑，右），步兵/弓兵/骑兵为手绘精灵；背景为手绘场景图（昼夜见 daynight.js），加载前/失败时用 fantasy-art.js 程序绘制。
 // PixiJS 按需动态加载；加载失败、WebGL 不可用或显卡上下文丢失时自动退回经典 Canvas 2D 版；?fx=classic 强制经典版。
-import { Battle, COL, colOf, clamp, lerp, rand, TAU, makeGlow, makeSmoke } from './battle.js?v=556a4503';
-import { t as tr } from './i18n.js?v=556a4503';
-import { drawSkyGround, drawFarLayer, drawNearLayer, drawForeground, towerTex } from './fantasy-art.js?v=556a4503';
+import { Battle, COL, colOf, clamp, lerp, rand, TAU, makeGlow, makeSmoke } from './battle.js?v=48d7dbbe';
+import { t as tr } from './i18n.js?v=48d7dbbe';
+import { drawSkyGround, drawFarLayer, drawNearLayer, drawForeground, towerTex } from './fantasy-art.js?v=48d7dbbe';
+import { skyState, moonPhase, moonCanvas, moonLit, sunTex, raysTex, duskTex } from './daynight.js?v=48d7dbbe';
 
 const ASSET_V = '4';
 // 手绘（ChatGPT）新素材：覆盖对应阵营的兵种；ONLY 表示该阵营暂时只显示这个兵种（其余兵种的新素材画好前，避免两种画风混在一起）
 const EXTRA = { blue: ['human_inf', 'human_arc', 'human_cav'], red: ['orc_inf', 'orc_arc', 'orc_cav'] };
 const ONLY = {}; // 军队贴图版本号（更新 assets/units 后加一）
+const BG_V = '1'; // 背景图（assets/bg）版本号
+// 背景图里会发光的地方（原图像素坐标）：火山口、熔岩、魔塔之眼、要塞火光、城堡窗户
+const BG_LIGHTS = [
+  { x: 1424, y: 158, r: 70, c: 0xff5a1e, lava: 1 }, { x: 1395, y: 215, r: 38, c: 0xff6a24, lava: 1 }, { x: 1468, y: 222, r: 38, c: 0xff6a24, lava: 1 },
+  { x: 1140, y: 90, r: 34, c: 0xffa040, eye: 1 }, { x: 1144, y: 220, r: 40, c: 0xff7a2a }, { x: 1060, y: 350, r: 60, c: 0xff5020 }, { x: 1300, y: 330, r: 60, c: 0xff5020 },
+  { x: 1480, y: 330, r: 55, c: 0xff5020 }, { x: 330, y: 200, r: 60, c: 0xffd48a, cas: 1 }, { x: 220, y: 280, r: 60, c: 0xffd48a, cas: 1 }, { x: 470, y: 300, r: 50, c: 0xffd48a, cas: 1 },
+];
+const mulNum = (a, b) => ((((a >> 16) * (b >> 16)) / 255) << 16) | (((((a >> 8) & 255) * ((b >> 8) & 255)) / 255) << 8) | (((a & 255) * (b & 255)) / 255);
+const loadImg = (src) => new Promise((res, rej) => { const im = new Image(); im.decoding = 'async'; im.onload = () => (im.naturalWidth ? res(im) : rej(new Error('empty'))); im.onerror = rej; im.src = src; });
 const UNIT_K = 0.42; // 精灵像素 → 战场单位（sc=1 时）
-const PIXI_URL = './vendor/pixi.js?v=556a4503';
+const PIXI_URL = './vendor/pixi.js?v=48d7dbbe';
 
 // ---------- 小工具 ----------
 function rng32(seed) { // 固定种子随机数：同一屏幕尺寸下背景每次生成都一样，窗口缩放时不会“换一座城”
@@ -164,6 +174,7 @@ export class GLBattle extends Battle {
     this.cv.style.display = 'none'; this.sizeEl = glc;
     this.gl = true;
     this._loadUnits().catch((e) => console.warn('写实单位贴图加载失败，沿用简笔士兵', e));
+    this._loadBg().catch((e) => console.warn('背景图加载失败，沿用程序绘制的背景', e));
     if (window.ResizeObserver) new ResizeObserver(() => this.gl && this.resize()).observe(glc);
     this.resize();
   }
@@ -195,6 +206,23 @@ export class GLBattle extends Battle {
       armies[side] = { meta, units };
     }
     if (this.gl) this.units = armies;
+  }
+  // 背景图：白天、黑夜各一张图集（天空 / 城堡 / 中间山谷 / 要塞 / 地面 / 月亮）；先加载当前时段那张，另一张随后加载
+  async _loadBg() {
+    const P = this.P, base = './assets/bg/';
+    const meta = await fetch(`${base}bg.json?v=${BG_V}`).then((r) => r.json());
+    const load = async (v) => {
+      const im = await loadImg(`${base}bg_${v}.webp?v=${BG_V}`);
+      const src = P.Texture.from(im, true).source, T = {};
+      for (const [k, f] of Object.entries(meta.pieces[v])) T[k] = new P.Texture({ source: src, frame: new P.Rectangle(f.x, f.y, f.w, f.h) });
+      if (meta.pieces[v].moon) { this.moonPh = moonPhase(); T.moonPh = P.Texture.from(moonCanvas(im, meta.pieces[v].moon, this.moonPh), true); }
+      return T;
+    };
+    const first = skyState().D > 0.5 ? 'day' : 'night', other = first === 'day' ? 'night' : 'day';
+    const tex = {}; tex[first] = await load(first);
+    if (!this.gl) return;
+    this.bgMeta = meta; this.bgTex = tex;
+    tex[other] = await load(other);
   }
   _spawnSoldier(side, atBase) {
     super._spawnSoldier(side, atBase);
@@ -249,7 +277,7 @@ export class GLBattle extends Battle {
       blue: T(glowTex(...COL.blue.glow)), red: T(glowTex(...COL.red.glow)), fire: T(glowTex(255, 160, 50)), white: T(glowTex(255, 240, 220)),
       smoke: T(makeSmoke()), cloud: T(smokeCloudTex()), line: T(lineTex()), fline: T(fadeLineTex()), ring: T(ringTex()),
       shadow: T(shadowTex()), crater: T(craterTex()), edge: T(edgeTex()), arrow: T(arrowTex()),
-      skyGlow: T(skyGlowTex()),
+      skyGlow: T(skyGlowTex()), sun: T(sunTex()), rays: T(raysTex()), dusk: T(duskTex()),
       tintB: T(hGradTex('rgba(37,99,235,0.16)', 'rgba(37,99,235,0.02)')), tintR: T(hGradTex('rgba(220,38,38,0.02)', 'rgba(220,38,38,0.16)')),
       px: P.Texture.WHITE,
     };
@@ -264,7 +292,7 @@ export class GLBattle extends Battle {
     stage.addChild(world, screen);
     const L = this.L = {};
     const add = (name, parent = world) => (L[name] = C(), parent.addChild(L[name]), L[name]);
-    for (const n of ['bg', 'sky', 'clouds', 'far', 'fires', 'near', 'nearFires', 'bolts', 'fog', 'tint', 'craters', 'lights', 'bases', 'front', 'units', 'smoke', 'fg', 'fx', 'debris', 'texts']) add(n);
+    for (const n of ['bg', 'cel', 'ground', 'sky', 'clouds', 'far', 'fires', 'rays', 'near', 'nearFires', 'bolts', 'fog', 'tint', 'craters', 'lights', 'bases', 'front', 'units', 'smoke', 'fg', 'wash', 'fx', 'debris', 'texts']) add(n);
     const S = (tex, parent, blend) => { const s = new P.Sprite(tex); if (blend) s.blendMode = blend; parent.addChild(s); return s; };
     this.sp = {
       bg: S(P.Texture.EMPTY, L.bg), skyGlow: S(this.tx.skyGlow, L.sky, 'add'),
@@ -273,6 +301,19 @@ export class GLBattle extends Battle {
       frontGlow: null,
       surge: S(this.tx.edge, screen), flash: S(P.Texture.WHITE, screen), vig: S(P.Texture.EMPTY, screen),
     };
+    { // 背景图精灵（图加载好之前隐藏）：天空 → 星星/日月 → 地面 → 远景（山谷、城堡、要塞，白天叠在黑夜上做渐变）
+      const E = (parent, blend) => { const s = S(P.Texture.EMPTY, parent, blend); s.visible = false; return s; };
+      const b = this.bgs = { skyN: E(L.bg), skyD: E(L.bg), dusk: E(L.bg) };
+      b.stars = new Pool(P, L.cel, this.tx.white, 'add');
+      Object.assign(b, { hglow: E(L.cel, 'add'), halo: E(L.cel, 'add'), rays: E(L.cel, 'add'), sun: E(L.cel, 'add'), moonHalo: E(L.cel, 'add'), moon: E(L.cel) });
+      b.groundN = E(L.ground); b.groundD = E(L.ground);
+      for (const k of ['mid', 'castle', 'fort']) { b[k + 'N'] = E(L.far); b[k + 'D'] = E(L.far); }
+      b.rays2 = E(L.rays, 'add'); b.wash = E(L.wash, 'add');
+      for (const k of ['hglow', 'halo', 'moonHalo', 'wash']) b[k].texture = this.tx.white;
+      b.hglow.texture = b.wash.texture = this.tx.fire; b.sun.texture = this.tx.sun; b.rays.texture = b.rays2.texture = this.tx.rays; b.dusk.texture = this.tx.dusk;
+      for (const k of ['halo', 'rays', 'sun', 'moonHalo', 'moon', 'rays2', 'hglow', 'wash']) b[k].anchor.set(0.5);
+      const R = rng32(77); b.starList = Array.from({ length: 110 }, () => ({ u: R(), v: Math.pow(R(), 1.4) * 0.92, s: 0.6 + R() * R() * 2.2, ph: R() * 9, f: 0.6 + R() * 2.5 }));
+    }
     this.gBolts = new P.Graphics(); this.gBolts.blendMode = 'add'; L.bolts.addChild(this.gBolts);
     this.gFront = new P.Graphics(); this.gFront.blendMode = 'add'; L.front.addChild(this.gFront);
     this.sp.frontGlow = S(this.tx.white, L.front, 'add'); this.sp.frontGlow.anchor.set(0.5);
@@ -286,6 +327,7 @@ export class GLBattle extends Battle {
       bulletLines: pool(L.debris, this.tx.arrow), glows: pool(L.fx, this.tx.white, 'add'), sparks: pool(L.fx, this.tx.line, 'add'),
       shells: pool(L.fx, this.tx.white, 'add'), rings: pool(L.fx, this.tx.ring, 'add'), streaks: pool(L.fx, this.tx.fline, 'add'),
       embers: pool(L.fx, P.Texture.WHITE, 'add'), debris: pool(L.debris, P.Texture.WHITE),
+      stars: this.bgs.stars, bgLights: pool(L.fires, this.tx.fire, 'add'),
     };
     // 大本营塔楼与旗帜
     this.bases = {};
@@ -362,13 +404,17 @@ export class GLBattle extends Battle {
     const surgeSide = this.lastSurge || 'blue';
     const smokeK = 1 + this.surgeT * 0.9 + Math.min(this.intensity, 6) * 0.1; // 战况越激烈，硝烟越浓
 
+    const img = !!(this.bgTex && (this.bgTex.day || this.bgTex.night));
+    const sky = img ? this._drawBgImg(cam) : null, D = sky ? sky.D : 0;
+    this.amb = sky ? sky.amb : 0xffffff; this.light = sky;
+    sp.bg.visible = sp.far.visible = sp.near.visible = sp.fg.visible = !img;
     sp.bg.position.set(-6, -6); sp.bg.width = W + 12; sp.bg.height = H + 12;
     // 天空火光：常态暗红，交战强度与总攻时更红（总攻时混入进攻方颜色）
     sp.skyGlow.position.set(-6, hz * 0.25); sp.skyGlow.width = W + 12; sp.skyGlow.height = hz * 0.78;
     sp.skyGlow.tint = mixNum(0xff4a1c, rgbNum(COL[surgeSide].glow), 0.35 * this.surgeT);
-    sp.skyGlow.alpha = clamp(0.4 + this.intensity * 0.05 + this.surgeT * 0.4, 0, 0.95);
+    sp.skyGlow.alpha = clamp(0.4 + this.intensity * 0.05 + this.surgeT * 0.4, 0, 0.95) * (img ? 0.75 - 0.6 * D : 1);
     // 浓烟云
-    for (const c of this.clouds) { const s = pl.clouds.get(); s.position.set(c.x - cam * 0.15, c.y * H); s.width = c.w * 1.2; s.height = c.h * 1.4; s.alpha = Math.min(0.9, c.a * 1.4 * (0.8 + smokeK * 0.25)); s.tint = mixNum(0x6f7ca8, 0x8a4a40, clamp(c.x / W, 0, 1)); }
+    for (const c of this.clouds) { const s = pl.clouds.get(); s.position.set(c.x - cam * 0.15, c.y * H); s.width = c.w * 1.2; s.height = c.h * 1.4; s.alpha = Math.min(0.9, c.a * 1.4 * (0.8 + smokeK * 0.25)) * (img ? 0.35 + 0.5 * (1 - D) : 1); s.tint = mixNum(mixNum(0x6f7ca8, 0x8a4a40, clamp(c.x / W, 0, 1)), 0xcfc8c2, D * 0.8); }
     // 远景 / 中景视差
     sp.far.position.set(-PAD - cam * 0.25, 0); sp.far.width = W + PAD * 2; sp.far.height = hz + 4;
     sp.near.position.set(-PAD - cam * 0.5, 0); sp.near.width = W + PAD * 2; sp.near.height = hz + 4;
@@ -377,8 +423,7 @@ export class GLBattle extends Battle {
       const s = pool.get(); s.position.set(f.x - PAD - off, f.y); s.width = s.height = 22 * f.s * k * (0.9 + fl * 0.2); s.alpha = clamp(fl * (f.warm ? 0.7 : 0.55 + this.intensity * 0.05), 0, 1);
       if (f.lava) s.tint = 0xff6a30; else if (f.warm) s.tint = 0xffd9a0;
     };
-    for (const f of this.farFires) fireAt(pl.fires, f, cam * 0.25, 1);
-    for (const f of this.nearFires) fireAt(pl.nearFires, f, cam * 0.5, 1.5);
+    if (!img) { for (const f of this.farFires) fireAt(pl.fires, f, cam * 0.25, 1); for (const f of this.nearFires) fireAt(pl.nearFires, f, cam * 0.5, 1.5); }
     // 远处炮口闪光：频率只由真实成交强度决定
     if (Math.random() < this.intensity * 0.9 * dt) this.hz.push({ x: Math.random() < 0.5 ? rand(0, W * 0.3) : rand(W * 0.7, W), life: 0.3, max: 0.3, s: rand(0.6, 1.4), col: Math.random() < 0.5 ? 0xffb070 : 0xffe0b0 });
     for (const h of this.hz) { h.life -= dt; const s = pl.fires.get(); const k = h.life / h.max; s.position.set(h.x, hz - 2); s.width = 120 * h.s; s.height = 40 * h.s; s.alpha = k * k * 0.9; s.tint = h.col; }
@@ -386,12 +431,16 @@ export class GLBattle extends Battle {
     // 烟柱：从着火的楼和残骸里升起
     const srcs = this.wrecks;
     if (this.plumes.length < 70 && Math.random() < dt * (2 + smokeK * 2)) {
+      if (img) { // 背景图模式：烟只从火山口冒出
+        const c = this._crater; if (c && Math.random() < 0.5) this.plumes.push({ x: c.x + rand(-4, 4) * c.s, y: c.y, far: false, vx: rand(3, 9), vy: rand(-12, -7), size: 9 * c.s / 0.45, life: rand(5, 8), max: 8 });
+      } else {
       const lava = this.farFires.filter((q) => q.lava); const useFar = Math.random() < 0.55 && lava.length;
       const f = useFar ? lava[(Math.random() * Math.min(3, lava.length)) | 0] : srcs[(Math.random() * srcs.length) | 0];
       if (f) this.plumes.push({ x: useFar ? f.x - PAD : f.x, y: f.y, far: useFar, vx: rand(4, 12), vy: rand(-14, -8), size: (useFar ? 6 : 8) * (f.s || 1), life: rand(4, 7), max: 7 });
+      }
     }
     for (const p of this.plumes) { p.life -= dt; p.x += p.vx * dt; p.y += p.vy * dt; p.size += dt * (p.far ? 4 : 6);
-      const s = pl.plumes.get(); s.position.set(p.x - (p.far ? cam * 0.25 : 0), p.y); s.width = s.height = p.size * 2; s.alpha = Math.min(1, p.life / p.max * 1.5) * Math.min(1, (1 - p.life / p.max) * 4) * 0.8 * Math.min(1.4, smokeK * 0.8); s.tint = 0x8a807c; }
+      const s = pl.plumes.get(); s.position.set(p.x - (p.far ? cam * 0.25 : 0), p.y); s.width = s.height = p.size * 2; s.alpha = Math.min(1, p.life / p.max * 1.5) * Math.min(1, (1 - p.life / p.max) * 4) * 0.8 * Math.min(1.4, smokeK * 0.8); s.tint = img ? mixNum(0x4a3434, 0xb8b0aa, D) : 0x8a807c; }
     this.plumes = this.plumes.filter((p) => p.life > 0);
     // 总攻闪电
     const gb = this.gBolts; gb.clear();
@@ -400,7 +449,7 @@ export class GLBattle extends Battle {
       for (const [w, a] of [[6, 0.15], [2, 0.9]]) { b.pts.forEach(([x, y], i) => (i ? gb.lineTo(x, y) : gb.moveTo(x, y))); gb.stroke({ width: w, color: rgbNum(col), alpha: a * k }); }
     }
     // 地平线硝烟
-    for (const f of this.fog) { const s = pl.fog.get(); s.position.set(f.x - cam * 0.6, hz); s.width = f.w * 1.2; s.height = f.h * 1.2; s.alpha = Math.min(0.95, f.a * smokeK * 0.85); s.tint = mixNum(0x5d6a8a, 0x7a4038, clamp(f.x / W, 0, 1)); }
+    for (const f of this.fog) { const s = pl.fog.get(); s.position.set(f.x - cam * 0.6, hz); s.width = f.w * 1.2; s.height = f.h * 1.2; s.alpha = Math.min(0.95, f.a * smokeK * 0.85) * (img ? 0.75 : 1); s.tint = mixNum(mixNum(0x5d6a8a, 0x7a4038, clamp(f.x / W, 0, 1)), 0xc9c0b4, D * 0.85); }
     // 领地色调
     const fx = this.frontX(H * 0.7);
     sp.tintB.position.set(0, hz); sp.tintB.width = fx; sp.tintB.height = H - hz;
@@ -429,12 +478,14 @@ export class GLBattle extends Battle {
         else if (C.defend && Math.abs(s.x - this.frontX(s.y)) < 70) { clip = C.defend; fi = Math.min(clip.n - 1, 2 + (((this.t * 1.5 + s.phase) | 0) % 2)); }
         else { clip = C.idle || C.walk; fi = ((this.t * 6 + s.phase) | 0) % clip.n; }
         const big = ut === 'cav' ? 2.2 : 1;
-        const us = this.us; const sh = pl.shadows.get(); sh.position.set(s.x - face * 2 * sc * us, s.y); sh.width = (s.dead ? 44 : 28) * sc * big * us; sh.height = 7 * sc * us * (ut === 'cav' ? 1.5 : 1); sh.alpha = fade * 0.9;
+        const us = this.us, Lt = this.light, sh = pl.shadows.get(); let shw = (s.dead ? 44 : 28) * sc * big * us, shx = s.x - face * 2 * sc * us;
+        if (Lt) { const away = s.x >= Lt.lx ? 1 : -1, ext = shw * Lt.shLen; shx += away * ext * 0.5; shw += ext; } // 影子背向光源，太阳越低越长
+        sh.position.set(shx, s.y); sh.width = shw; sh.height = 7 * sc * us * (ut === 'cav' ? 1.5 : 1); sh.alpha = fade * 0.9 * (Lt ? Lt.shA : 1);
         const K = (U.k || UNIT_K) * sc * us, bob = (s.moving && !s.dead && U.k && ut === 'inf') ? Math.abs(Math.sin(s.phase)) * 1.2 * sc * us : 0;
         const u = pl.soldiers.get(clip.tex[fi]); u.anchor.set(U.ax, U.ay);
         u.position.set(s.x, s.y - bob); u.scale.set(K * face, K); u.alpha = fade;
         const depth = clamp((s.y - this.laneTop) / (this.laneBot - this.laneTop), 0, 1);
-        u.tint = mixNum(0xb4b8c6, 0xffffff, depth); // 远处稍暗，增加纵深
+        u.tint = mulNum(mixNum(0xb4b8c6, 0xffffff, depth), this.amb); // 远处稍暗，增加纵深；再乘上环境光（夜里偏蓝暗，晨昏偏暖）
       } else {
       const sh = pl.shadows.get(); sh.position.set(s.x, s.y); sh.width = 18 * sc; sh.height = 6 * sc; sh.alpha = fade;
       const fr = tx.soldier[s.side];
@@ -501,13 +552,77 @@ export class GLBattle extends Battle {
     this.R.render(this.stage);
   }
 
+  // 背景图 + 昼夜：返回光照信息（白天程度、环境光、光源位置、影子长度）
+  _drawBgImg(cam) {
+    const { W, H, t } = this, hz = this.horizon, m = this.bgMeta, b = this.bgs, T = this.bgTex;
+    const st = skyState();
+    let D = st.D; if (!T.night) D = 1; if (!T.day) D = 0;
+    const warm = st.warm, ss = Math.min((hz - 2) / (m.yh - m.top), W / 1360), sg = Math.max(W / m.iw, (H - hz) / (m.ih - m.yh));
+    const tintD = mixNum(0xffffff, 0xffb683, warm * 0.6), tintN = mixNum(0xffffff, 0xffc4a0, warm * 0.25);
+    const put = (key, x, y, sx, sy) => {
+      const n = b[key + 'N'], d = b[key + 'D'];
+      n.visible = !!T.night && D < 0.997; d.visible = !!T.day && D > 0.003;
+      if (n.visible) { n.texture = T.night[key]; n.position.set(x, y); n.scale.set(sx, sy); n.tint = tintN; }
+      if (d.visible) { d.texture = T.day[key]; d.position.set(x, y); d.scale.set(sx, sy); d.alpha = n.visible ? D : 1; d.tint = tintD; }
+    };
+    // 天空（拉伸铺满地平线以上）
+    const skyH = hz * (m.ylim / m.yh) + 6; put('sky', -6, -6, (W + 12) / 784, skyH / 226);
+    // 地面：等比铺满，地平线对齐
+    put('ground', W / 2 - (m.iw * sg) / 2, hz - (m.yh - 420) * sg, sg, sg);
+    // 远景：城堡贴左边、要塞贴右边，中间山谷补空隙（窄屏时整体缩小，两座城都完整可见）
+    const y0 = hz - m.yh * ss, cx0 = -14 - cam * 0.15, fx0 = W + 14 - cam * 0.15 - 708 * ss, cR = cx0 + 720 * ss;
+    const midW = Math.max(450 * ss, fx0 - cR + 260 * ss), mcx = (cR + fx0) / 2;
+    put('mid', mcx - midW / 2, y0, midW / 450, ss); put('castle', cx0, y0, ss, ss); put('fort', fx0, y0, ss, ss);
+    const toScr = (ix, iy) => [ix <= 700 ? cx0 + ix * ss : ix >= 880 ? fx0 + (ix - 860) * ss : mcx + (ix - 785) * (midW / 450), y0 + iy * ss];
+    // 晨昏霞光：天空下半部染成橙粉色
+    b.dusk.visible = warm > 0.01; b.dusk.position.set(-6, hz * 0.1); b.dusk.width = W + 12; b.dusk.height = hz * 0.95; b.dusk.tint = mixNum(0xff7b3a, 0xff9a6a, D); b.dusk.alpha = warm * 0.55;
+    // 星星：入夜渐现，轻微闪烁
+    const starA = Math.pow(1 - D, 1.6);
+    if (starA > 0.02) for (const s of b.starList) { const p = b.stars.get(); p.position.set(s.u * W, s.v * hz * 0.95); p.width = p.height = s.s * 2.2; p.alpha = starA * (0.45 + 0.55 * Math.abs(Math.sin(t * s.f * 0.7 + s.ph))); p.tint = s.s > 2 ? 0xdfe8ff : 0xffffff; }
+    // 日月轨迹：从左（人族）升起，到右（兽族）落下；越过地平线后被地面和远景挡住
+    const arc = (pr) => [lerp(W * 0.2, W * 0.8, pr), hz - (hz - H * 0.08) * Math.sin(Math.PI * pr)]; // 从城堡后面升起、在要塞与山谷之间落下
+    const R0 = clamp(36 * ss, 10, 30);
+    const sunOn = st.p > -0.08 && st.p < 1.08, [sx, sy] = arc(st.p), sunA = clamp((st.alt + 0.08) / 0.12, 0, 1);
+    const sunCol = mixNum(0xfff3d6, 0xff8a3c, warm);
+    b.sun.visible = b.halo.visible = b.rays.visible = b.rays2.visible = sunOn && sunA > 0;
+    if (b.sun.visible) {
+      b.sun.position.set(sx, sy); b.sun.width = b.sun.height = R0 * 4.2; b.sun.tint = sunCol; b.sun.alpha = sunA;
+      b.halo.position.set(sx, sy); b.halo.width = b.halo.height = R0 * (16 + warm * 10); b.halo.tint = sunCol; b.halo.alpha = (0.55 + warm * 0.3) * sunA;
+      b.rays.position.set(sx, sy); b.rays.width = b.rays.height = R0 * 26; b.rays.rotation = t * 0.012; b.rays.tint = sunCol; b.rays.alpha = (0.12 + 0.3 * warm) * sunA;
+      b.rays2.position.set(sx, sy); b.rays2.width = b.rays2.height = R0 * 40; b.rays2.rotation = -t * 0.008 + 0.6; b.rays2.tint = sunCol; b.rays2.alpha = (0.04 + 0.16 * warm) * sunA; // 光束越过城堡洒到战场上
+    }
+    b.hglow.visible = warm > 0.02 && sunOn; // 地平线上太阳附近的大片暖光
+    if (b.hglow.visible) { b.hglow.position.set(sx, hz - 6); b.hglow.width = W * 1.1; b.hglow.height = hz * 1.3; b.hglow.tint = 0xff7a36; b.hglow.alpha = warm * 0.8; }
+    const MT = T.night && T.night.moonPh, moonOn = !!MT && st.mq > -0.08 && st.mq < 1.08, [mx, my] = arc(st.mq), lit = moonLit(this.moonPh || 0.5), moonA = clamp(1 - D * 1.15, 0, 1);
+    b.moon.visible = b.moonHalo.visible = moonOn && moonA > 0.01;
+    if (b.moon.visible) {
+      b.moon.texture = MT; b.moon.position.set(mx, my); b.moon.width = b.moon.height = R0 * 2.15; b.moon.alpha = moonA;
+      b.moonHalo.position.set(mx, my); b.moonHalo.width = b.moonHalo.height = R0 * 12; b.moonHalo.tint = 0xa8c0ff; b.moonHalo.alpha = (0.15 + 0.35 * lit) * moonA;
+    }
+    // 发光点：熔岩昼夜都亮，夜里更亮；魔塔之眼、要塞火光、城堡窗户只在夜里亮
+    const night = 1 - D;
+    for (const L of BG_LIGHTS) {
+      const a = L.lava ? 0.35 + 0.5 * night : L.eye ? 0.15 + 0.75 * night : (L.cas ? 0.35 : 0.6) * night;
+      if (a < 0.02) continue;
+      const fl = 0.75 + 0.15 * Math.sin(t * (L.cas ? 2 : 7) + L.x) + 0.1 * Math.sin(t * 17 + L.y), [x, y] = toScr(L.x, L.y), g = this.pl.bgLights.get();
+      g.position.set(x, y); g.width = g.height = L.r * 2 * ss * fl; g.alpha = a * fl; g.tint = L.c;
+    }
+    const [cx, cy] = toScr(1424, 150); this._crater = { x: cx, y: cy, s: ss };
+    // 光照：光源（白天太阳、夜里月亮）的位置决定影子方向；晨昏时战场蒙上一层暖光
+    const dayL = D >= 0.5, lx = dayL ? sx : mx, elev = dayL ? Math.max(0, st.alt) : Math.max(0, Math.sin(Math.PI * clamp(st.mq, 0, 1)));
+    b.wash.visible = (dayL ? warm : 0.4) * (dayL ? sunA : moonA) > 0.02;
+    if (b.wash.visible) { b.wash.position.set(lx, hz); b.wash.width = W * 1.8; b.wash.height = H * 1.5; b.wash.tint = dayL ? 0xff9a50 : 0x5f7cff; b.wash.alpha = dayL ? warm * 0.3 * sunA : 0.07 * moonA * lit; }
+    const amb = mixNum(0x8f9dca, mixNum(0xffffff, 0xffcfa0, warm), D);
+    return { D, warm, amb, lx, shLen: 1.6 * (1 - elev), shA: dayL ? 1 : 0.55 };
+  }
+
   _drawBasesGL(t) {
     const { H, pl, tx } = this;
     const by = H * 0.66;
     for (const side of ['blue', 'red']) {
       const b = this.bases[side], m = b.meta, blue = side === 'blue', dir = blue ? 1 : -1, x = blue ? this.baseL : this.baseR, c = colOf(side);
       const g = pl.baseGlow.get(tx[side]); g.position.set(x, by - 10); g.width = 150; g.height = 100; g.alpha = 0.4;
-      b.body.anchor.set(m.ax / m.w, m.ay / m.h); b.body.position.set(x, by); b.body.scale.set(dir / SR, 1 / SR);
+      b.body.anchor.set(m.ax / m.w, m.ay / m.h); b.body.position.set(x, by); b.body.scale.set(dir / SR, 1 / SR); b.body.tint = this.amb || 0xffffff;
       // 火把 / 火盆
       for (const [ox, oy] of m.torches) {
         const f = 0.7 + 0.2 * Math.sin(t * 11 + ox) + 0.1 * Math.sin(t * 27 + oy);

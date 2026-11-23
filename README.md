@@ -15,6 +15,7 @@ BTC、ETH 及 Binance / OKX / Coinbase 上 900+ 币种的实时价格 + 多空�
 - 模拟逻辑（前线、兵力、炮弹、爆炸）仍在 `js/battle.js`，WebGL 绘制在 `js/battle-gl.js`，两版看到的是同一场战斗。
 - 加 `?fx=classic` 使用经典 Canvas 2D 版；WebGL 不可用或显卡上下文丢失时也会自动退回经典版。
 - 军队贴图：人族（蓝金）与兽族（红黑）的步兵、弓兵、骑兵都是手绘精灵动画，用 `tools/3d/pack_sheets.py` 打包成图集 `assets/units/`（AVIF 为主、PNG 兜底；朝左的素材打包时自动镜像）。Quaternius 3D 渲染的 `army_*` 图集只作备用（见 [CREDITS.md](CREDITS.md)）。
+- 背景：白天、黑夜两张手绘场景，用 `tools/bg/bg_build.py` 自动切成 天空 / 人族城堡 / 中间山谷 / 兽族要塞 / 地面 几层（`assets/bg/`）。按浏览器本地时间昼夜切换（日出日落按日期估算），太阳、月亮从左往右沿弧线升落，月相按真实日期；晨昏有霞光、光束和暖色调，影子背向光源、太阳越低越长。预览：`?time=18:30` 固定时刻，`?speed=600` 时间加速。
 - PixiJS 已打包在 `js/vendor/pixi.js`（按需动态加载，约 170KB gzip），重新打包运行 `./tools/build-pixi.sh`。
 
 > 仅供娱乐参考，不构成投资建议。
