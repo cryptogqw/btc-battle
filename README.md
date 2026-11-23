@@ -14,7 +14,7 @@ BTC、ETH 及 Binance / OKX / Coinbase 上 900+ 币种的实时价格 + 多空�
 - 默认使用 PixiJS（WebGL）渲染奇幻战场：左边人族（蓝金）城堡与松林，右边兽族（红黑）火山、熔岩与原创黑色尖塔；兵种有剑盾步兵、弓兵（抛物线射箭）、骑兵；大单化作投石车的燃烧巨石，巨鲸单是天降火雨。
 - 模拟逻辑（前线、兵力、炮弹、爆炸）仍在 `js/battle.js`，WebGL 绘制在 `js/battle-gl.js`，两版看到的是同一场战斗。
 - 加 `?fx=classic` 使用经典 Canvas 2D 版；WebGL 不可用或显卡上下文丢失时也会自动退回经典版。
-- 军队贴图：Quaternius 免费 3D 素材（见 [CREDITS.md](CREDITS.md)）在 Blender 里组装、改色（人族蓝金 / 兽族红黑）后渲染成侧视精灵图集 `assets/units/`（AVIF 为主、PNG 兜底），脚本见 `tools/3d/`。
+- 军队贴图：人族（蓝金）与兽族（红黑）的步兵、弓兵、骑兵都是手绘精灵动画，用 `tools/3d/pack_sheets.py` 打包成图集 `assets/units/`（AVIF 为主、PNG 兜底；朝左的素材打包时自动镜像）。Quaternius 3D 渲染的 `army_*` 图集只作备用（见 [CREDITS.md](CREDITS.md)）。
 - PixiJS 已打包在 `js/vendor/pixi.js`（按需动态加载，约 170KB gzip），重新打包运行 `./tools/build-pixi.sh`。
 
 > 仅供娱乐参考，不构成投资建议。

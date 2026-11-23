@@ -1,0 +1,27 @@
+{
+  "root": "/Users/jamesgong/AI/btc-battle-assets/chatgpt/orc_zip",
+  "units": [
+    {"unit": "inf", "out": "/Users/jamesgong/AI/btc-battle-assets/out4/orc_inf", "screen_h": 46, "down": 2, "h_from": "idle",
+     "clips": [
+       {"name": "idle", "src": "OI3-guard", "pick": [0], "loop": true},
+       {"name": "walk", "src": "OI3-run"},
+       {"name": "attack", "src": "OI3-slash"},
+       {"name": "defend", "src": "OI3-guard"},
+       {"name": "death", "src": "OI3-fall"}
+     ]},
+    {"unit": "arc", "out": "/Users/jamesgong/AI/btc-battle-assets/out4/orc_arc", "screen_h": 44, "down": 2, "h_from": "idle",
+     "release": {"clip": "shoot", "x": 435, "y": 162},
+     "clips": [
+       {"name": "idle", "src": "OA3-shoot", "pick": [0], "loop": true},
+       {"name": "walk", "src": "OA3-run"},
+       {"name": "shoot", "src": "OA3-shoot"},
+       {"name": "death", "src": "OA3-fall"}
+     ]},
+    {"unit": "cav", "out": "/Users/jamesgong/AI/btc-battle-assets/out4/orc_cav", "screen_h": 74, "down": 2, "h_from": "walk",
+     "clips": [
+       {"name": "walk", "src": "OC2-run"},
+       {"name": "attack", "src": "OC2-charge"},
+       {"name": "death", "src": "OC2-fall"}
+     ]}
+  ]
+}

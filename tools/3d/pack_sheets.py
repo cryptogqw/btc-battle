@@ -13,6 +13,7 @@ def load(path):
 def frames_of(key):
     m = anim[key]; a = load(os.path.join(root, m['sheet'])); fw, fh = m['frameWidth'], m['frameHeight']
     out = [a[r * fh:(r + 1) * fh, c * fw:(c + 1) * fw] for r in range(m['rows']) for c in range(m['columns'])]
+    if m.get('facing') == 'left': out = [f[:, ::-1].copy() for f in out]   # 统一成朝右（游戏里红方再翻转）
     return out, m
 
 for unit in cfg['units']:
@@ -21,7 +22,9 @@ for unit in cfg['units']:
         fr, m = frames_of(c['src'])
         if 'pick' in c: fr = [fr[i] for i in c['pick']]; dur = None
         else: dur = sum(m['durationsMs']) / 1000
-        clips.append((c['name'], fr, c.get('loop', m['repeat']), dur, m['anchorPx']))
+        ap = list(m['anchorPx'])
+        if m.get('facing') == 'left': ap[0] = m['frameWidth'] - ap[0]
+        clips.append((c['name'], fr, c.get('loop', m['repeat']), dur, ap))
     ax, ay = clips[0][4]
     # 所有帧的不透明区域取并集，统一裁剪（锚点保持不变）
     mask = np.zeros(clips[0][1][0].shape[:2], bool)
@@ -31,7 +34,14 @@ for unit in cfg['units']:
     pad = 4; y0, x0 = max(0, y0 - pad), max(0, x0 - pad); y1, x1 = min(mask.shape[0], y1 + pad), min(mask.shape[1], x1 + pad)
     cw, ch = x1 - x0, y1 - y0
     # 人物/坐骑的实际高度（锚点以上），用于换算缩放系数
-    body_h = ay - ys.min()
+    # h_from：只用指定动作量身高（避免举起的武器把身高算大）；默认用所有帧
+    if 'h_from' in unit:
+        hm = np.zeros_like(mask)
+        for name, fr, _, _, _ in clips:
+            if name == unit['h_from']:
+                for f in fr: hm |= f[..., 3] > 0.03
+        body_h = ay - np.where(hm)[0].min()
+    else: body_h = ay - ys.min()
     k = unit['screen_h'] / body_h
     rows, meta_clips = [], {}
     for name, fr, loop, dur, _ in clips:
