@@ -1,14 +1,14 @@
 // 战场动画 WebGL 版（PixiJS）：模拟逻辑完全沿用 battle.js 的 Battle（前线、兵力、炮弹、爆炸都由行情驱动），这里只负责绘制。绘制。
 // 奇幻战场：人族（蓝金，左）对兽族（红黑，右），步兵/弓兵/骑兵为手绘精灵；背景为手绘场景图（昼夜见 daynight.js），加载前/失败时用 fantasy-art.js 程序绘制。
 // PixiJS 按需动态加载；加载失败、WebGL 不可用或显卡上下文丢失时自动退回经典 Canvas 2D 版；?fx=classic 强制经典版。
-import { Battle, COL, colOf, clamp, lerp, rand, TAU, makeGlow, makeSmoke } from './battle.js?v=48d7dbbe';
-import { t as tr } from './i18n.js?v=48d7dbbe';
-import { drawSkyGround, drawFarLayer, drawNearLayer, drawForeground, towerTex } from './fantasy-art.js?v=48d7dbbe';
-import { skyState, moonPhase, moonCanvas, moonLit, sunTex, raysTex, duskTex } from './daynight.js?v=48d7dbbe';
+import { Battle, COL, colOf, clamp, lerp, rand, TAU, makeGlow, makeSmoke } from './battle.js?v=cee31399';
+import { t as tr } from './i18n.js?v=cee31399';
+import { drawSkyGround, drawFarLayer, drawNearLayer, drawForeground, towerTex } from './fantasy-art.js?v=cee31399';
+import { skyState, moonPhase, moonCanvas, moonLit, sunTex, raysTex, duskTex } from './daynight.js?v=cee31399';
 
-const ASSET_V = '4';
+const ASSET_V = '5';
 // 手绘（ChatGPT）新素材：覆盖对应阵营的兵种；ONLY 表示该阵营暂时只显示这个兵种（其余兵种的新素材画好前，避免两种画风混在一起）
-const EXTRA = { blue: ['human_inf', 'human_arc', 'human_cav'], red: ['orc_inf', 'orc_arc', 'orc_cav'] };
+const EXTRA = { blue: ['human_inf', 'human_arc', 'human_cav', 'human_mage'], red: ['orc_inf', 'orc_arc', 'orc_cav', 'orc_dragon'] };
 const ONLY = {}; // 军队贴图版本号（更新 assets/units 后加一）
 const BG_V = '1'; // 背景图（assets/bg）版本号
 // 背景图里会发光的地方（原图像素坐标）：火山口、熔岩、魔塔之眼、要塞火光、城堡窗户
@@ -20,7 +20,7 @@ const BG_LIGHTS = [
 const mulNum = (a, b) => ((((a >> 16) * (b >> 16)) / 255) << 16) | (((((a >> 8) & 255) * ((b >> 8) & 255)) / 255) << 8) | (((a & 255) * (b & 255)) / 255);
 const loadImg = (src) => new Promise((res, rej) => { const im = new Image(); im.decoding = 'async'; im.onload = () => (im.naturalWidth ? res(im) : rej(new Error('empty'))); im.onerror = rej; im.src = src; });
 const UNIT_K = 0.42; // 精灵像素 → 战场单位（sc=1 时）
-const PIXI_URL = './vendor/pixi.js?v=48d7dbbe';
+const PIXI_URL = './vendor/pixi.js?v=cee31399';
 
 // ---------- 小工具 ----------
 function rng32(seed) { // 固定种子随机数：同一屏幕尺寸下背景每次生成都一样，窗口缩放时不会“换一座城”
@@ -194,7 +194,7 @@ export class GLBattle extends Battle {
       for (const extra of EXTRA[side]) {
         try {
           const em = await fetch(`${base}${extra}.json?v=${ASSET_V}`).then((r) => r.json());
-          let ei; try { ei = await img(`${base}${extra}.avif?v=${ASSET_V}`); } catch { ei = await img(`${base}${extra}.png?v=${ASSET_V}`); }
+          let ei; try { ei = await img(`${base}${extra}.avif?v=${ASSET_V}`); } catch { try { ei = await img(`${base}${extra}.webp?v=${ASSET_V}`); } catch { ei = await img(`${base}${extra}.png?v=${ASSET_V}`); } }
           const es = P.Texture.from(ei, true).source; const [ew, eh] = em.cell;
           for (const [u, ud] of Object.entries(em.units)) {
             const clips = {};
@@ -223,6 +223,112 @@ export class GLBattle extends Battle {
     if (!this.gl) return;
     this.bgMeta = meta; this.bgTex = tex;
     tex[other] = await load(other);
+  }
+  // ---------- 施法者：人族魔法师在后方放法球、兽族飞龙飞到前线喷火球，替代原来的投石（投石 / 巨石级大单） ----------
+  _casterU(side) { const A = this.gl && this.units && this.units[side]; return A && A.units[side === 'blue' ? 'mage' : 'dragon']; }
+  _muzzle(...a) { if (!this._noMuzzle) super._muzzle(...a); }
+  _shell(side, usd, kind) {
+    if (kind === 'whale' || !this._casterU(side)) return super._shell(side, usd, kind);
+    const c = this._caster(side);
+    if (c.queue.length >= 5 && c.st !== 'in') this._launch(c, { usd, kind }); else c.queue.push({ usd, kind }); // 大单扎堆时不再排队，直接发射
+  }
+  _caster(side) { // 找一个空闲的施法者，没有就召唤一个（数量有上限，多了就排队连发）
+    const mine = this.casters.filter((c) => c.side === side && c.st !== 'out');
+    const max = this.W < 520 ? 2 : 3;
+    let best = null; for (const c of mine) if (!best || c.queue.length + (c.st === 'cast') < best.queue.length + (best.st === 'cast')) best = c;
+    if (best && (best.queue.length + (best.st === 'cast') === 0 || mine.length >= max)) return best;
+    return this._spawnCaster(side);
+  }
+  _spawnCaster(side, surge) {
+    const blue = side === 'blue', us = this.us, c = { side, st: 'in', t: 0, queue: [], idle: 0, a: 0, surge: !!surge, auto: rand(0.6, 1.6), ph: rand(0, TAU) };
+    if (blue) { // 魔法师：在人族后方（塔楼与弓兵之间）现身
+      c.x = this.baseL + rand(20, 70) * us;
+      const ys = this.casters.filter((o) => o.side === 'blue').map((o) => o.y); // 和已有的魔法师错开，别叠在一起
+      c.y = rand(this.laneTop + 8, this.laneBot - 6); for (let i = 0; i < 6 && ys.some((y) => Math.abs(y - c.y) < 28); i++) c.y = rand(this.laneTop + 8, this.laneBot - 6);
+      this._sparkle(c.x, c.y - 26 * this.scaleAt(c.y) * us, '#9cc8ff', 14);
+    } else { // 飞龙：从右边（要塞方向）飞进来
+      c.x = this.W + 70; c.y = rand(this.H * 0.06, this.horizon * 0.55); this._dragonHome(c);
+    }
+    this.casters.push(c); return c;
+  }
+  _dragonHome(c) { // 飞龙悬停点：前线上空偏兽族一侧
+    const others = this.casters.filter((o) => o !== c && o.side === 'red' && o.hy != null).map((o) => o.hy);
+    let hy = rand(this.horizon * 0.45, this.laneTop - 22 * this.us); // 低空掠过前线上方，和别的龙错开高度
+    for (let i = 0; i < 6 && others.some((y) => Math.abs(y - hy) < 34 * this.us); i++) hy = rand(this.horizon * 0.3, this.laneTop - 22 * this.us);
+    c.hx = clamp(this.frontX(this.laneTop + 40) + rand(15, 80) * this.us, this.W * 0.22, this.W - 40); c.hy = hy; c.ho = c.hx - this.frontX(this.laneTop + 40);
+  }
+  _sparkle(x, y, col, n) {
+    this.parts.push({ type: 'glow', spr: 'blue', x, y, vx: 0, vy: 0, life: 0.45, max: 0.45, size: 60, add: true, grow: 1.2 });
+    for (let i = 0; i < n; i++) { const a = rand(0, TAU), v = rand(30, 90); this.parts.push({ type: 'spark', x, y: y + rand(-14, 14), vx: Math.cos(a) * v, vy: Math.sin(a) * v - 30, life: rand(0.4, 0.8), max: 0.8, col: Math.random() < 0.5 ? col : '#ffe08a', w: 1.6 }); }
+  }
+  _castPoint(c) { // 法杖顶端 / 龙嘴的屏幕坐标
+    const U = this._casterU(c.side), cl = c.side === 'blue' ? U.clips.cast : U.clips.breath, K = this._casterK(c, U), face = c.face || (c.side === 'blue' ? 1 : -1);
+    const pt = cl.pt || [U.anchorPx + 40, U.footY - 40];
+    return [c.x + face * (pt[0] - U.anchorPx) * K, c.y + (pt[1] - U.footY) * K];
+  }
+  _casterK(c, U) { return c.side === 'blue' ? U.k * 1.15 * this.scaleAt(c.y) * this.us : U.k * this.us * (0.75 + 0.35 * clamp(c.y / this.horizon, 0, 1.2)); }
+  _launch(c, job) {
+    const [sx, sy] = this._castPoint(c), blue = c.side === 'blue';
+    this._noMuzzle = true; super._shell(c.side, job.usd, job.kind); this._noMuzzle = false;
+    const s = this.shells[this.shells.length - 1]; if (!s) return;
+    s.sx = s.x = sx; s.sy = s.y = sy; s.cast = blue ? 'mage' : 'dragon'; s.noText = !!job.mini;
+    if (!blue) s.tx = Math.min(s.tx, c.x - 20); // 火球只往前（人族方向）喷
+    const d = Math.hypot(s.tx - sx, s.ty - sy);
+    if (blue) { s.h = this.H * rand(0.06, 0.12); s.T = clamp(d / 480, 0.5, 1.1); } else { s.h = -this.H * 0.03; s.T = clamp(d / 420, 0.4, 0.9); }
+    this.parts.push({ type: 'glow', spr: blue ? 'blue' : 'fire', x: sx, y: sy, vx: 0, vy: 0, life: 0.3, max: 0.3, size: job.kind === 'heavy' ? 60 : 42, add: true });
+    if (blue) this.parts.push({ type: 'glow', spr: 'white', x: sx, y: sy, vx: 0, vy: 0, life: 0.18, max: 0.18, size: 26, add: true });
+  }
+  _drawCasters(dt) {
+    const { pl, tx } = this, us = this.us;
+    for (const side of ['blue', 'red']) { // 总攻：进攻方的魔法师 / 飞龙出阵助战，自己定时施法
+      if (this.surge !== side || !this._casterU(side)) continue;
+      const want = this.W < 520 ? 1 : 2, have = this.casters.filter((c) => c.side === side && c.st !== 'out').length;
+      if (have < want && Math.random() < dt * 2) this._spawnCaster(side, true);
+    }
+    for (const c of this.casters) {
+      const U = this._casterU(c.side); if (!U) { c.dead = true; continue; }
+      const blue = c.side === 'blue', surging = this.surge === c.side;
+      c.t += dt;
+      if (c.st === 'in') {
+        if (blue) { c.a = Math.min(1, c.a + dt * 3); if (c.a >= 1) c.st = 'idle'; }
+        else {
+          c.a = 1; const dx = c.hx - c.x, dy = c.hy - c.y, d = Math.hypot(dx, dy), v = 260 * us * dt;
+          if (d < v + 2) c.st = 'idle'; else { c.x += dx / d * v; c.y += dy / d * v; }
+        }
+      } else if (c.st === 'idle') {
+        if (!blue) { // 悬停：跟着前线挪动，轻轻上下浮动
+          const hx = clamp(this.frontX(this.laneTop + 40) + c.ho, this.W * 0.22, this.W - 40);
+          c.x += (hx - c.x) * Math.min(1, dt * 1.5); c.y += (c.hy + Math.sin(c.t * 1.7 + c.ph) * 6 - c.y) * Math.min(1, dt * 2);
+        }
+        if (!c.queue.length && surging && (c.auto -= dt) <= 0) { c.queue.push({ usd: this.th.shell, kind: 'shell', mini: true }); c.auto = rand(1.8, 3.2); }
+        if (c.queue.length) { c.st = 'cast'; c.ct = 0; c.fired = false; c.idle = 0; }
+        else if ((c.idle += dt) > (surging ? 1e9 : 2.6)) { c.st = 'out'; if (blue) this._sparkle(c.x, c.y - 26 * this.scaleAt(c.y) * us, '#9cc8ff', 10); }
+      } else if (c.st === 'cast') {
+        const cl = blue ? U.clips.cast : U.clips.breath, dur = cl.dur || 0.9, rf = cl.rf != null ? cl.rf : 3;
+        c.ct += dt * (c.queue.length > 2 ? 1.6 : 1); // 排队多时加快施法
+        if (!c.fired && c.ct >= (rf / cl.n) * dur) { c.fired = true; this._launch(c, c.queue.shift()); }
+        if (c.ct >= dur) c.st = 'idle';
+      } else if (c.st === 'out') {
+        if (blue) { c.a -= dt * 3; if (c.a <= 0) c.dead = true; }
+        else { c.face = 1; c.x += 240 * us * dt; c.y -= 40 * us * dt; if (c.x > this.W + 90) c.dead = true; }
+      }
+      // 绘制
+      const face = c.face || (blue ? 1 : -1), K = this._casterK(c, U);
+      let clip, fi;
+      if (c.st === 'cast') { clip = blue ? U.clips.cast : U.clips.breath; fi = Math.min(clip.n - 1, (c.ct / (clip.dur || 0.9) * clip.n) | 0); }
+      else if (blue) { clip = U.clips.cast; fi = 0; }
+      else { clip = U.clips.fly; fi = ((c.t / (clip.dur || 0.75)) * clip.n | 0) % clip.n; }
+      if (!blue) { // 飞龙在地上的影子
+        const sh = pl.shadows.get(); sh.position.set(c.x, this.laneTop + 4 + clamp(c.y / this.horizon, 0, 1) * 12); sh.width = 70 * us; sh.height = 9 * us; sh.alpha = 0.22 * c.a;
+      } else { const sh = pl.shadows.get(); sh.position.set(c.x, c.y); sh.width = 30 * this.scaleAt(c.y) * us; sh.height = 7 * this.scaleAt(c.y) * us; sh.alpha = 0.9 * c.a; }
+      const sp = (blue ? pl.casters : pl.air).get(clip.tex[fi]); sp.anchor.set(U.ax, U.ay);
+      sp.position.set(c.x, c.y); sp.scale.set(K * face, K); sp.alpha = c.a; sp.tint = this.amb || 0xffffff;
+      if (blue) { // 法杖宝石的微光
+        const [gx, gy] = this._castPoint(c), g = pl.casterFx.get(tx.blue); g.position.set(gx, gy); const p = c.st === 'cast' ? 1.8 : 1;
+        g.width = g.height = 26 * K / U.k * 0.4 * p; g.alpha = (0.5 + 0.2 * Math.sin(this.t * 5 + c.ph)) * c.a;
+      }
+    }
+    this.casters = this.casters.filter((c) => !c.dead);
   }
   _spawnSoldier(side, atBase) {
     super._spawnSoldier(side, atBase);
@@ -292,7 +398,7 @@ export class GLBattle extends Battle {
     stage.addChild(world, screen);
     const L = this.L = {};
     const add = (name, parent = world) => (L[name] = C(), parent.addChild(L[name]), L[name]);
-    for (const n of ['bg', 'cel', 'ground', 'sky', 'clouds', 'far', 'fires', 'rays', 'near', 'nearFires', 'bolts', 'fog', 'tint', 'craters', 'lights', 'bases', 'front', 'units', 'smoke', 'fg', 'wash', 'fx', 'debris', 'texts']) add(n);
+    for (const n of ['bg', 'cel', 'ground', 'sky', 'clouds', 'far', 'fires', 'rays', 'near', 'nearFires', 'bolts', 'fog', 'tint', 'craters', 'lights', 'bases', 'front', 'units', 'smoke', 'air', 'fg', 'wash', 'fx', 'debris', 'texts']) add(n);
     const S = (tex, parent, blend) => { const s = new P.Sprite(tex); if (blend) s.blendMode = blend; parent.addChild(s); return s; };
     this.sp = {
       bg: S(P.Texture.EMPTY, L.bg), skyGlow: S(this.tx.skyGlow, L.sky, 'add'),
@@ -328,6 +434,7 @@ export class GLBattle extends Battle {
       shells: pool(L.fx, this.tx.white, 'add'), rings: pool(L.fx, this.tx.ring, 'add'), streaks: pool(L.fx, this.tx.fline, 'add'),
       embers: pool(L.fx, P.Texture.WHITE, 'add'), debris: pool(L.debris, P.Texture.WHITE),
       stars: this.bgs.stars, bgLights: pool(L.fires, this.tx.fire, 'add'),
+      casters: pool(L.units, P.Texture.EMPTY), casterFx: pool(L.units, this.tx.white, 'add'), air: pool(L.air, P.Texture.EMPTY), airFx: pool(L.air, this.tx.fire, 'add'),
     };
     // 大本营塔楼与旗帜
     this.bases = {};
@@ -339,7 +446,7 @@ export class GLBattle extends Battle {
       this.bases[side] = b;
     }
     this.textObjs = new Map();
-    this.hz = []; this.plumes = []; this._lastNow = performance.now();
+    this.hz = []; this.plumes = []; this.casters = []; this._lastNow = performance.now();
   }
 
   // 尺寸变化时重建背景贴图（经典版在 GL 就绪前仍会调用父类方法）
@@ -497,6 +604,7 @@ export class GLBattle extends Battle {
       }
       if (!U && this.surge === s.side && !s.dead) { const g = pl.unitGlow.get(tx[s.side]); g.position.set(s.x, s.y - 12 * sc); g.width = 28 * sc; g.height = 36 * sc; g.alpha = 0.45 * this.surgeT; }
     }
+    if (this.casters.length || this.surge) this._drawCasters(dt);
     // 硝烟
     for (const m of this.smoke) { const s = pl.smoke.get(); s.position.set(m.x, m.y); s.width = s.height = m.size * 2; s.alpha = Math.min(1, m.life / m.max * 1.4) * 0.8; s.rotation = m.rot; }
     // 前景工事（反向视差，增加纵深）
@@ -524,8 +632,22 @@ export class GLBattle extends Battle {
         const d = pl.debris.get(); d.anchor.set(0.5); d.position.set(p.x, p.y); d.width = p.s * 2; d.height = p.s; d.rotation = p.rot; d.tint = 0x2a2a35;
       }
     }
-    for (const s of this.shells) { // 投石车的燃烧巨石 / 天降陨火
+    for (const s of this.shells) { // 魔法球 / 龙焰火球 / 天降陨火
       const big = s.kind === 'whale' ? 3 : s.kind === 'heavy' ? 2 : 1.3;
+      if (s.cast === 'mage') { // 蓝白法球，金色星屑拖尾
+        const o = pl.shells.get(tx.blue); o.position.set(s.x, s.y); o.width = o.height = 46 * big;
+        const g = pl.shells.get(tx.fire); g.position.set(s.x, s.y); g.width = g.height = 26 * big; g.tint = 0xffe08a; g.alpha = 0.7;
+        const c = pl.shells.get(tx.white); c.position.set(s.x, s.y); c.width = c.height = 13 * big;
+        if (Math.random() < 0.6) this.parts.push({ type: 'spark', x: s.x, y: s.y, vx: rand(-40, 40), vy: rand(-40, 40), life: 0.4, max: 0.4, col: Math.random() < 0.5 ? '#ffe08a' : '#bfe0ff', w: 1.4 });
+        continue;
+      }
+      if (s.cast === 'dragon') { // 龙焰火球：更大更橙，带火星
+        const o = pl.shells.get(tx.fire); o.position.set(s.x, s.y); o.width = o.height = 50 * big; o.tint = 0xff5a18;
+        const m = pl.shells.get(tx.fire); m.position.set(s.x, s.y); m.width = m.height = 26 * big; m.tint = 0xffc060;
+        const c = pl.shells.get(tx.white); c.position.set(s.x, s.y); c.width = c.height = 12 * big;
+        if (Math.random() < 0.7) this.parts.push({ type: 'spark', x: s.x, y: s.y, vx: rand(-30, 60), vy: rand(-60, 10), life: 0.45, max: 0.45, col: Math.random() < 0.5 ? '#ffb040' : '#ff6a20', w: 1.8 });
+        continue;
+      }
       const o = pl.shells.get(tx.fire); o.position.set(s.x, s.y); o.width = o.height = 40 * big; o.tint = 0xff7a30;
       const c = pl.shells.get(tx.white); c.position.set(s.x, s.y); c.width = c.height = 13 * big;
       const t2 = pl.shells.get(tx[s.side]); t2.position.set(s.x, s.y); t2.width = t2.height = 22 * big; t2.alpha = 0.55;

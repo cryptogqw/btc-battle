@@ -1,5 +1,5 @@
 // 战场动画：Canvas 2D，蓝军（多）在左，红军（空）在右
-import { t as tr, fmtUsd } from './i18n.js?v=48d7dbbe';
+import { t as tr, fmtUsd } from './i18n.js?v=cee31399';
 const TAU = Math.PI * 2;
 const rand = (a, b) => a + Math.random() * (b - a);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -438,7 +438,7 @@ export class Battle {
         this.explode(s.x, s.y, s.side, power, { whale: s.kind === 'whale' });
         // 伤害数字
         const lvl = s.kind === 'whale' ? 3 : s.kind === 'heavy' ? 2 : 1;
-        this.texts.push({ x: s.x + rand(-10, 10), y: s.y - 24, vx: rand(-14, 14), txt: (lvl === 3 ? tr('crit') : '-') + fmtUsd(s.usd), side: s.side, life: 1.4 + lvl * 0.3, max: 1.4 + lvl * 0.3, lvl });
+        if (!s.noText) this.texts.push({ x: s.x + rand(-10, 10), y: s.y - 24, vx: rand(-14, 14), txt: (lvl === 3 ? tr('crit') : '-') + fmtUsd(s.usd), side: s.side, life: 1.4 + lvl * 0.3, max: 1.4 + lvl * 0.3, lvl });
         if (s.kind === 'whale') { this.zoom = 1.07; this.shake = Math.max(this.shake, 22); }
       }
     }

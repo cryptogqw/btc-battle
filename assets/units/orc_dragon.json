@@ -1,0 +1,1 @@
+{"cell": [233, 176], "foot_y": 94, "units": {"dragon": {"anchor_x": 120, "k": 0.6122, "clips": {"fly": {"row": 0, "n": 6, "loop": true, "dur": 0.75}, "breath": {"row": 1, "n": 6, "loop": false, "dur": 0.85, "rf": 3, "pt": [153.0, 46.8]}}}}, "size": [1398, 352]}
