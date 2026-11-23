@@ -1,12 +1,12 @@
 // 战场动画 WebGL 版（PixiJS）：模拟逻辑完全沿用 battle.js 的 Battle（前线、兵力、炮弹、爆炸都由行情驱动），这里只负责绘制。绘制。
 // 奇幻战场：人族（蓝金，左）对兽族（红黑，右），步兵/弓兵/骑兵为手绘精灵；背景为手绘场景图（昼夜见 daynight.js），加载前/失败时用 fantasy-art.js 程序绘制。
 // PixiJS 按需动态加载；加载失败、WebGL 不可用或显卡上下文丢失时自动退回经典 Canvas 2D 版；?fx=classic 强制经典版。
-import { Battle, COL, colOf, clamp, lerp, rand, TAU, makeGlow, makeSmoke } from './battle.js?v=9e4f0133';
-import { t as tr } from './i18n.js?v=9e4f0133';
-import { drawSkyGround, drawFarLayer, drawNearLayer, drawForeground, towerTex } from './fantasy-art.js?v=9e4f0133';
-import { skyState, moonPhase, moonCanvas, moonLit, sunTex, raysTex, duskTex } from './daynight.js?v=9e4f0133';
+import { Battle, COL, colOf, clamp, lerp, rand, TAU, makeGlow, makeSmoke } from './battle.js?v=68a03bc3';
+import { t as tr } from './i18n.js?v=68a03bc3';
+import { drawSkyGround, drawFarLayer, drawNearLayer, drawForeground, towerTex } from './fantasy-art.js?v=68a03bc3';
+import { skyState, moonPhase, moonCanvas, moonLit, sunTex, raysTex, duskTex } from './daynight.js?v=68a03bc3';
 
-const ASSET_V = '5';
+const ASSET_V = '6';
 // 手绘（ChatGPT）新素材：覆盖对应阵营的兵种；ONLY 表示该阵营暂时只显示这个兵种（其余兵种的新素材画好前，避免两种画风混在一起）
 const EXTRA = { blue: ['human_inf', 'human_arc', 'human_cav', 'human_mage'], red: ['orc_inf', 'orc_arc', 'orc_cav', 'orc_dragon'] };
 const ONLY = {}; // 军队贴图版本号（更新 assets/units 后加一）
@@ -24,8 +24,13 @@ const CASTLE_FLAGS = {
 };
 const mulNum = (a, b) => ((((a >> 16) * (b >> 16)) / 255) << 16) | (((((a >> 8) & 255) * ((b >> 8) & 255)) / 255) << 8) | (((a & 255) * (b & 255)) / 255);
 const loadImg = (src) => new Promise((res, rej) => { const im = new Image(); im.decoding = 'async'; im.onload = () => (im.naturalWidth ? res(im) : rej(new Error('empty'))); im.onerror = rej; im.src = src; });
-const UNIT_K = 0.42; // 精灵像素 → 战场单位（sc=1 时）
-const PIXI_URL = './vendor/pixi.js?v=9e4f0133';
+const UNIT_K = 0.42;
+// 画质档位：2 高 / 1 中 / 0 低。手机默认中档；运行时按实际帧率自动升降；?q=low|mid|high 可强制
+const QUALITY = { 2: { res: 2, parts: 600, stars: 110, rays2: 1, wash: 1, rays: 1, vig: 1, tint: 1, march: 1 },
+  1: { res: 1.5, parts: 320, stars: 70, rays2: 0, wash: 0, rays: 1, vig: 1, tint: 1, march: 1 },
+  0: { res: 1, parts: 160, stars: 40, rays2: 0, wash: 0, rays: 0, vig: 0, tint: 0, march: 0.5 } };
+const QPARAM = { low: 0, mid: 1, high: 2 }[new URLSearchParams(location.search).get('q')]; // 精灵像素 → 战场单位（sc=1 时）
+const PIXI_URL = './vendor/pixi.js?v=68a03bc3';
 
 // ---------- 小工具 ----------
 function rng32(seed) { // 固定种子随机数：同一屏幕尺寸下背景每次生成都一样，窗口缩放时不会“换一座城”
@@ -168,7 +173,10 @@ export class GLBattle extends Battle {
     const glc = document.createElement('canvas'); glc.className = 'battle-gl'; glc.setAttribute('aria-hidden', 'true');
     this.cv.after(glc);
     const r0 = this.cv.getBoundingClientRect();
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const mobile = matchMedia('(pointer: coarse)').matches || innerWidth < 700, weak = (navigator.hardwareConcurrency || 8) <= 4 || (navigator.deviceMemory || 8) <= 3;
+    this.qFixed = QPARAM != null; this.q = this.qFixed ? QPARAM : weak ? 0 : mobile ? 1 : 2; this.qMax = this.qFixed ? this.q : mobile ? (weak ? 1 : 2) : 2;
+    this.perf = { t0: performance.now(), n: 0, sum: 0, cool: 0, good: 0 }; this._t0 = performance.now();
+    const dpr = this._res();
     const renderer = await P.autoDetectRenderer({
       preference: 'webgl', canvas: glc, width: Math.max(1, r0.width), height: Math.max(1, r0.height), resolution: dpr,
       antialias: dpr < 2, background: '#05070f', autoDensity: false, powerPreference: 'high-performance', hello: false,
@@ -181,35 +189,31 @@ export class GLBattle extends Battle {
     this._loadUnits().catch((e) => console.warn('写实单位贴图加载失败，沿用简笔士兵', e));
     this._loadBg().catch((e) => console.warn('背景图加载失败，沿用程序绘制的背景', e));
     if (window.ResizeObserver) new ResizeObserver(() => this.gl && this.resize()).observe(glc);
+    this.onScreen = true; // 战场滚出屏幕时不渲染（模拟照常跑），省电
+    if (window.IntersectionObserver) new IntersectionObserver((es) => { this.onScreen = es[es.length - 1].isIntersecting; }, { rootMargin: '60px' }).observe(glc);
     this.resize();
   }
   async _loadUnits() {
+    // 手绘图集并行加载；只有某个兵种缺图时才退回旧的 3D 渲染图集（省掉约 730KB 下载和一大块显存）
     const P = this.P, base = './assets/units/';
     const img = (src) => new Promise((res, rej) => { const im = new Image(); im.decoding = 'async'; im.onload = () => (im.naturalWidth ? res(im) : rej(new Error('empty'))); im.onerror = rej; im.src = src; });
-    const armies = {};
-    for (const [side, name] of [['blue', 'human'], ['red', 'orc']]) {
-      const meta = await fetch(`${base}army_${name}.json?v=${ASSET_V}`).then((r) => r.json());
-      let im; try { im = await img(`${base}army_${name}.avif?v=${ASSET_V}`); } catch { im = await img(`${base}army_${name}.png?v=${ASSET_V}`); }
-      const source = P.Texture.from(im, true).source; const [cw, ch] = meta.cell; const units = {};
+    const tryImg = async (name) => { for (const ext of ['webp', 'avif']) { try { return await img(`${base}${name}.${ext}?v=${ASSET_V}`); } catch {} } throw new Error('no image ' + name); };
+    const addAtlas = (units, meta, im) => {
+      const source = P.Texture.from(im, true).source, [cw, ch] = meta.cell;
       for (const [u, ud] of Object.entries(meta.units)) {
         const clips = {};
         for (const [k, c] of Object.entries(ud.clips)) clips[k] = { ...c, tex: Array.from({ length: c.n }, (_, i) => new P.Texture({ source, frame: new P.Rectangle(i * cw, c.row * ch, cw, ch) })) };
         units[u] = { clips, ax: ud.anchor_x / cw, ay: meta.foot_y / ch, anchorPx: ud.anchor_x, k: ud.k, footY: meta.foot_y };
       }
-      for (const extra of EXTRA[side]) {
-        try {
-          const em = await fetch(`${base}${extra}.json?v=${ASSET_V}`).then((r) => r.json());
-          let ei; try { ei = await img(`${base}${extra}.avif?v=${ASSET_V}`); } catch { try { ei = await img(`${base}${extra}.webp?v=${ASSET_V}`); } catch { ei = await img(`${base}${extra}.png?v=${ASSET_V}`); } }
-          const es = P.Texture.from(ei, true).source; const [ew, eh] = em.cell;
-          for (const [u, ud] of Object.entries(em.units)) {
-            const clips = {};
-            for (const [k, c] of Object.entries(ud.clips)) clips[k] = { ...c, tex: Array.from({ length: c.n }, (_, i) => new P.Texture({ source: es, frame: new P.Rectangle(i * ew, c.row * eh, ew, eh) })) };
-            units[u] = { clips, ax: ud.anchor_x / ew, ay: em.foot_y / eh, anchorPx: ud.anchor_x, k: ud.k, footY: em.foot_y };
-          }
-        } catch (e) { console.warn('新素材加载失败', extra, e); }
-      }
-      armies[side] = { meta, units };
-    }
+    };
+    const loadOne = async (name) => { const [meta, im] = await Promise.all([fetch(`${base}${name}.json?v=${ASSET_V}`).then((r) => r.json()), tryImg(name)]); return { meta, im }; };
+    const armies = {};
+    await Promise.all([['blue', 'human'], ['red', 'orc']].map(async ([side, name]) => {
+      const units = {}, got = await Promise.all(EXTRA[side].map((e) => loadOne(e).catch((err) => { console.warn('新素材加载失败', e, err); return null; })));
+      if (['inf', 'arc', 'cav'].some((u) => !got.some((g) => g && g.meta.units[u]))) { const a = await loadOne(`army_${name}`); addAtlas(units, a.meta, a.im); }
+      for (const g of got) if (g) addAtlas(units, g.meta, g.im);
+      armies[side] = { meta: { foot_y: 0 }, units };
+    }));
     if (this.gl) this.units = armies;
   }
   // 背景图：白天、黑夜各一张图集（天空 / 城堡 / 中间山谷 / 要塞 / 地面 / 月亮）；先加载当前时段那张，另一张随后加载
@@ -226,8 +230,10 @@ export class GLBattle extends Battle {
     const first = skyState().D > 0.5 ? 'day' : 'night', other = first === 'day' ? 'night' : 'day';
     const tex = {}; tex[first] = await load(first);
     if (!this.gl) return;
-    this.bgMeta = meta; this.bgTex = tex;
-    tex[other] = await load(other);
+    this.bgMeta = meta; this.bgTex = tex; this._buildArt(); // 释放程序背景
+    this._bgOther = () => { this._bgOther = null; load(other).then((t) => { tex[other] = t; }).catch((e) => console.warn('背景图加载失败', other, e)); };
+    // 另一张（白天/黑夜）在临近晨昏时才加载；电脑上空闲时也顺手加载
+    if (this.qMax === 2 && this.q === 2) setTimeout(() => this._bgOther && this._bgOther(), 4000);
   }
   // ---------- 施法者：人族魔法师在后方放法球、兽族飞龙飞到前线喷火球，替代原来的投石（投石 / 巨石级大单） ----------
   _casterU(side) { const A = this.gl && this.units && this.units[side]; return A && A.units[side === 'blue' ? 'mage' : 'dragon']; }
@@ -457,12 +463,16 @@ export class GLBattle extends Battle {
   // 尺寸变化时重建背景贴图（经典版在 GL 就绪前仍会调用父类方法）
   _buildArt() {
     if (!this.gl) return super._buildArt();
-    const { W, H, dpr, P } = this; if (!W || !H) return;
+    const { W, H, P } = this, dpr = this._res(); if (!W || !H) return;
     if (this.R.width !== W || this.R.height !== H || this.R.resolution !== dpr) this.R.resize(W, H, dpr);
     const T = (c) => P.Texture.from(c, true);
     const swap = (sprite, c) => { const old = sprite.texture; sprite.texture = T(c); if (old && old !== P.Texture.EMPTY) old.destroy(true); };
     const hz = this.horizon, PAD = this.PADg = 110, s = dpr;
     const seed = 1000 + Math.round(W / 40); // 同一宽度区间背景固定
+    if (this.bgTex) { // 已有手绘背景：程序背景不再生成，并释放它们占的显存（手机上能省下二十多 MB）
+      for (const k of ['bg', 'far', 'near', 'fg']) { const o = this.sp[k].texture; if (o && o !== P.Texture.EMPTY) { this.sp[k].texture = P.Texture.EMPTY; o.destroy(true); } }
+      this.wrecks = this.wrecks || []; this.farFires = []; this.nearFires = []; this.fgH = this.fgH || 30;
+    } else {
     // 天空 + 地面（左草地、右火山灰）+ 远处的投石车残骸
     {
       const c = mk(W * s, H * s), x = c.getContext('2d'); x.scale(s, s);
@@ -488,8 +498,9 @@ export class GLBattle extends Battle {
       this.fgH = fh + 4;
       swap(this.sp.fg, c);
     }
+    }
     // 大本营塔楼
-    {
+    if (!this.bgTex) {
       const bw = clamp(W * 0.06, 38, 66), bh = clamp(H * 0.2, 56, 110), R = rng32(seed + 4);
       for (const side of ['blue', 'red']) { const b = towerTex(side, bw, bh, R, SR); this.bases[side].meta = b; swap(this.bases[side].body, b.c); }
       this.bunkerH = bh;
@@ -502,7 +513,29 @@ export class GLBattle extends Battle {
     }
   }
 
-  draw() { if (this.gl) this._drawGL(); else super.draw(); }
+  get Q() { return QUALITY[this.q]; }
+  _res() { return Math.min(window.devicePixelRatio || 1, QUALITY[this.q].res); }
+  draw() {
+    if (!this.gl) return super.draw();
+    if (!this.onScreen || document.hidden) { this._lastNow = performance.now(); this._lastFrame = 0; return; }
+    const now = performance.now();
+    if (this._lastFrame && now - this._lastFrame < 9) return; // 120/144Hz 高刷屏隔帧画（约 60–72 帧），省一半 GPU
+    if (this._lastFrame) this._perfTick(now - this._lastFrame);
+    this._lastFrame = now;
+    this._drawGL();
+  }
+  // 自动画质：每 2 秒看一次平均帧间隔；掉帧就降档（降分辨率、关大面积光效），长期流畅再升回来
+  _perfTick(ms) {
+    const p = this.perf; p.n++; p.sum += Math.min(ms, 100);
+    const now = performance.now(); if (now - p.t0 < 2000) return;
+    const avg = p.sum / p.n; p.t0 = now; p.n = 0; p.sum = 0;
+    if (this.qFixed || now < p.cool || now - this._t0 < 8000) return; // 开头几秒在解码、上传贴图，不算
+    const fps = 1000 / avg, bad = (this.q === 2 && fps < 48) || (this.q === 1 && fps < 28);
+    p.bad = bad ? (p.bad || 0) + 1 : 0;
+    if (p.bad >= 2) { this._setQ(this.q - 1); p.cool = now + 4000; p.good = 0; p.bad = 0; p.noUp = now + 30000; return; } // 连续 4 秒掉帧才降档
+    if (fps > 57 && this.q < this.qMax && now > (p.noUp || 0)) { if (++p.good >= 5) { this._setQ(this.q + 1); p.good = 0; p.cool = now + 4000; } } else p.good = 0;
+  }
+  _setQ(q) { this.q = clamp(q, 0, 2); const r = this._res(); if (this.R && this.R.resolution !== r) { this.R.resize(this.W, this.H, r); this._buildArt(); } }
 
   _drawGL() {
     const { W, H, sp, pl, tx } = this; if (!W || !this.wrecks) return;
@@ -564,6 +597,8 @@ export class GLBattle extends Battle {
     for (const f of this.fog) { const s = pl.fog.get(); s.position.set(f.x - cam * 0.6, hz); s.width = f.w * 1.2; s.height = f.h * 1.2; s.alpha = Math.min(0.95, f.a * smokeK * 0.85) * (img ? 0.75 : 1); s.tint = mixNum(mixNum(0x5d6a8a, 0x7a4038, clamp(f.x / W, 0, 1)), 0xc9c0b4, D * 0.85); }
     // 领地色调
     const fx = this.frontX(H * 0.7);
+    sp.tintB.visible = sp.tintR.visible = !!this.Q.tint;
+    if (this.parts.length > this.Q.parts) this.parts.splice(0, this.parts.length - this.Q.parts); // 粒子上限（低档更少）
     sp.tintB.position.set(0, hz); sp.tintB.width = fx; sp.tintB.height = H - hz;
     sp.tintR.position.set(fx, hz); sp.tintR.width = W - fx; sp.tintR.height = H - hz;
     // 弹坑：刚炸出时还冒着火星，随后慢慢变淡
@@ -675,14 +710,15 @@ export class GLBattle extends Battle {
     sv.visible = this.surgeT > 0; sv.tint = rgbNum(COL[surgeSide].glow); sv.alpha = (0.22 + 0.12 * (0.5 + 0.5 * Math.sin(t * 6))) * this.surgeT;
     const fl = sp.flash; fl.position.set(0, 0); fl.width = W; fl.height = H; fl.visible = this.flash > 0.01; fl.alpha = this.flash;
     fl.tint = rgbNum(this.flashCol.split(',').map(Number));
-    sp.vig.position.set(0, 0); sp.vig.width = W; sp.vig.height = H;
+    sp.vig.position.set(0, 0); sp.vig.width = W; sp.vig.height = H; sp.vig.visible = !!this.Q.vig;
     this.R.render(this.stage);
   }
 
   // 背景图 + 昼夜：返回光照信息（白天程度、环境光、光源位置、影子长度）
   _drawBgImg(cam, dt) {
     const { W, H, t } = this, hz = this.horizon, m = this.bgMeta, b = this.bgs, T = this.bgTex;
-    const st = skyState();
+    const st = skyState(), Q = this.Q;
+    if (this._bgOther && Math.abs(st.alt) < 0.3) this._bgOther(); // 快到晨昏，加载另一张
     let D = st.D; if (!T.night) D = 1; if (!T.day) D = 0;
     const warm = st.warm, ss = Math.min((hz - 2) / (m.yh - m.top), W / 1360), sg = Math.max(W / m.iw, (H - hz) / (m.ih - m.yh));
     const tintD = mixNum(0xffffff, 0xffb683, warm * 0.6), tintN = mixNum(0xffffff, 0xffc4a0, warm * 0.25);
@@ -705,13 +741,13 @@ export class GLBattle extends Battle {
     b.dusk.visible = warm > 0.01; b.dusk.position.set(-6, hz * 0.1); b.dusk.width = W + 12; b.dusk.height = hz * 0.95; b.dusk.tint = mixNum(0xff7b3a, 0xff9a6a, D); b.dusk.alpha = warm * 0.55;
     // 星星：入夜渐现，轻微闪烁
     const starA = Math.pow(1 - D, 1.6);
-    if (starA > 0.02) for (const s of b.starList) { const p = b.stars.get(); p.position.set(s.u * W, s.v * hz * 0.95); p.width = p.height = s.s * 2.2; p.alpha = starA * (0.45 + 0.55 * Math.abs(Math.sin(t * s.f * 0.7 + s.ph))); p.tint = s.s > 2 ? 0xdfe8ff : 0xffffff; }
+    if (starA > 0.02) for (let i = 0; i < Q.stars; i++) { const s = b.starList[i]; const p = b.stars.get(); p.position.set(s.u * W, s.v * hz * 0.95); p.width = p.height = s.s * 2.2; p.alpha = starA * (0.45 + 0.55 * Math.abs(Math.sin(t * s.f * 0.7 + s.ph))); p.tint = s.s > 2 ? 0xdfe8ff : 0xffffff; }
     // 日月轨迹：从左（人族）升起，到右（兽族）落下；越过地平线后被地面和远景挡住
     const arc = (pr) => [lerp(W * 0.2, W * 0.8, pr), hz - (hz - H * 0.08) * Math.sin(Math.PI * pr)]; // 从城堡后面升起、在要塞与山谷之间落下
     const R0 = clamp(36 * ss, 10, 30);
     const sunOn = st.p > -0.08 && st.p < 1.08, [sx, sy] = arc(st.p), sunA = clamp((st.alt + 0.08) / 0.12, 0, 1);
     const sunCol = mixNum(0xfff3d6, 0xff8a3c, warm);
-    b.sun.visible = b.halo.visible = b.rays.visible = b.rays2.visible = sunOn && sunA > 0;
+    b.sun.visible = b.halo.visible = sunOn && sunA > 0; b.rays.visible = b.sun.visible && !!Q.rays; b.rays2.visible = b.sun.visible && !!Q.rays2;
     if (b.sun.visible) {
       b.sun.position.set(sx, sy); b.sun.width = b.sun.height = R0 * 4.2; b.sun.tint = sunCol; b.sun.alpha = sunA;
       b.halo.position.set(sx, sy); b.halo.width = b.halo.height = R0 * (16 + warm * 10); b.halo.tint = sunCol; b.halo.alpha = (0.55 + warm * 0.3) * sunA;
@@ -739,7 +775,7 @@ export class GLBattle extends Battle {
     this._flagPts = {}; for (const side in CASTLE_FLAGS) this._flagPts[side] = CASTLE_FLAGS[side].map(([x, y, k]) => [...toScr(x, y), k * ss / 0.44]);
     // 光照：光源（白天太阳、夜里月亮）的位置决定影子方向；晨昏时战场蒙上一层暖光
     const dayL = D >= 0.5, lx = dayL ? sx : mx, elev = dayL ? Math.max(0, st.alt) : Math.max(0, Math.sin(Math.PI * clamp(st.mq, 0, 1)));
-    b.wash.visible = (dayL ? warm : 0.4) * (dayL ? sunA : moonA) > 0.02;
+    b.wash.visible = !!Q.wash && (dayL ? warm * sunA : 0.07 * moonA * lit) > 0.02;
     if (b.wash.visible) { b.wash.position.set(lx, hz); b.wash.width = W * 1.8; b.wash.height = H * 1.5; b.wash.tint = dayL ? 0xff9a50 : 0x5f7cff; b.wash.alpha = dayL ? warm * 0.3 * sunA : 0.07 * moonA * lit; }
     const amb = mixNum(0x8f9dca, mixNum(0xffffff, 0xffcfa0, warm), D);
     return { D, warm, amb, lx, shLen: 1.6 * (1 - elev), shA: dayL ? 1 : 0.55 };
@@ -758,7 +794,7 @@ export class GLBattle extends Battle {
       for (const side of ['blue', 'red']) { const g = GATE[side]; for (let i = 0; i < 12; i++) { const m = mk(side, lerp(g.x, g.to, Math.random() * 0.95)); M.push(m); } }
     }
     for (const side of ['blue', 'red']) {
-      if ((this.marchT[side] -= dt) <= 0) { const m = mk(side); m.x = GATE[side].x; M.push(m); this.marchT[side] = rand(0.7, 1.5) / (1 + Math.min(2, (this.activity[side] || 0) * 0.6)); }
+      if ((this.marchT[side] -= dt) <= 0) { const m = mk(side); m.x = GATE[side].x; M.push(m); this.marchT[side] = rand(0.7, 1.5) / (1 + Math.min(2, (this.activity[side] || 0) * 0.6)) / this.Q.march; }
     }
     for (const m of M) {
       const g = GATE[m.side], A = this.units[m.side], U = A && A.units[m.ut]; if (!U) continue;
@@ -775,26 +811,31 @@ export class GLBattle extends Battle {
 
   // 背景图模式：不画大本营塔楼，把双方军旗插在远处的城堡 / 要塞上
   _drawCastleFlags(t) {
-    const P = this.P;
-    if (!this.cflags) {
-      this.cflags = {};
-      for (const side in CASTLE_FLAGS) this.cflags[side] = CASTLE_FLAGS[side].map(() => {
-        const o = { mast: new P.Graphics(), flag: new P.Graphics(), label: new P.Text({ text: '', style: { fontFamily: '-apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif', fontSize: 30, fontWeight: '900', fill: '#ffffff' } }) };
-        o.label.anchor.set(0.5); this.L.flags.addChild(o.mast, o.flag, o.label); return o;
+    // 军旗预先画成 8 帧飘动的贴图（换语言时重画），每帧只摆精灵，不再逐帧重建矢量图形
+    const P = this.P, S = 3, FN = 8;
+    const frames = (side, lab) => {
+      const blue = side === 'blue', dir = blue ? 1 : -1, pole = 26, fw = 30, fh = 20, w = fw + 6, h = pole + 6, ox = blue ? 2 : w - 2;
+      return Array.from({ length: FN }, (_, f) => {
+        const c = mk(w * S, h * S), x = c.getContext('2d'); x.scale(S, S);
+        const top = h - 2 - pole, ph = (f / FN) * TAU, yy = (q, base) => base + Math.sin(ph - q * 4) * 2.4 * q;
+        x.strokeStyle = blue ? '#e2c27a' : '#2a1a1a'; x.lineWidth = 1.8; x.beginPath(); x.moveTo(ox, h - 2); x.lineTo(ox, top); x.stroke();
+        x.beginPath();
+        for (let j = 0; j <= 10; j++) { const q = j / 10; x.lineTo(ox + dir * fw * q, yy(q, top + 2)); }
+        for (let j = 10; j >= 0; j--) { const q = j / 10; x.lineTo(ox + dir * fw * q, yy(q, top + 2 + fh)); }
+        x.closePath(); x.fillStyle = blue ? '#1e4fd8' : '#a01510'; x.fill(); x.lineWidth = 1.3; x.strokeStyle = blue ? '#e8b83c' : '#111111'; x.stroke();
+        x.fillStyle = '#fff'; x.font = '900 12px -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
+        x.fillText(lab, ox + dir * fw * 0.5, yy(0.5, top + 2 + fh / 2));
+        const tex = P.Texture.from(c, true); tex.ax = ox / w; tex.ay = (h - 2) / h; tex.sc = 1 / S; return tex;
       });
-    }
+    };
+    if (!this.cflags) { this.cflags = {}; for (const side in CASTLE_FLAGS) this.cflags[side] = { lab: null, tex: null, sp: CASTLE_FLAGS[side].map(() => { const o = new P.Sprite(P.Texture.EMPTY); this.L.flags.addChild(o); return o; }) }; }
+    const amb = this.amb || 0xffffff;
     for (const side in this.cflags) {
-      const blue = side === 'blue', dir = blue ? 1 : -1, lab = blue ? tr('flagL') : tr('flagS'), pts = this._flagPts[side];
-      this.cflags[side].forEach((o, i) => {
-        const [x, y, k] = pts[i], ph = i * 1.7, ph2 = blue ? 0 : 0.8, pole = 26 * k, fw = 30 * k, fh = 20 * k, top = y - pole, amb = this.amb || 0xffffff;
-        o.mast.clear().moveTo(x, y).lineTo(x, top).stroke({ width: Math.max(1, 1.8 * k), color: blue ? 0xe2c27a : 0x2a1a1a });
-        const ptsF = [];
-        for (let j = 0; j <= 10; j++) { const q = j / 10; ptsF.push(x + dir * fw * q, top + 2 + Math.sin(t * 5 - q * 4 + ph + ph2) * 2.4 * k * q); }
-        for (let j = 10; j >= 0; j--) { const q = j / 10; ptsF.push(x + dir * fw * q, top + 2 + fh + Math.sin(t * 5 - q * 4 + ph + ph2) * 2.4 * k * q); }
-        o.flag.clear().poly(ptsF).fill({ color: blue ? 0x1e4fd8 : 0xa01510 }).stroke({ width: Math.max(1, 1.3 * k), color: blue ? 0xe8b83c : 0x111111 });
-        o.mast.tint = o.flag.tint = o.label.tint = amb;
-        if (o.label.text !== lab) o.label.text = lab;
-        o.label.scale.set(0.42 * k); o.label.position.set(x + dir * fw * 0.5, top + 2 + fh / 2 + Math.sin(t * 5 - 2 + ph + ph2) * 1.2 * k);
+      const F = this.cflags[side], lab = side === 'blue' ? tr('flagL') : tr('flagS'), pts = this._flagPts[side];
+      if (F.lab !== lab) { if (F.tex) F.tex.forEach((x) => x.destroy(true)); F.tex = frames(side, lab); F.lab = lab; }
+      F.sp.forEach((o, i) => {
+        const [x, y, k] = pts[i], tex = F.tex[((((t * 5 + i * 1.7 + (side === 'blue' ? 0 : 0.8)) / TAU) * FN) | 0) % FN];
+        o.texture = tex; o.anchor.set(tex.ax, tex.ay); o.position.set(x, y); o.scale.set(tex.sc * k); o.tint = amb;
       });
     }
   }
