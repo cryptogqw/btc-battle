@@ -1,5 +1,5 @@
 // 战场动画：Canvas 2D，蓝军（多）在左，红军（空）在右
-import { t as tr, fmtUsd } from './i18n.js?v=f7b28f84';
+import { t as tr, fmtUsd } from './i18n.js?v=556a4503';
 const TAU = Math.PI * 2;
 const rand = (a, b) => a + Math.random() * (b - a);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -403,7 +403,7 @@ export class Battle {
       }
       const nearFront = Math.abs(s.x - fx) < 70 || s.ranged; // 弓兵在后排也持续放箭
       // 待机射击频率 ∝ 该方近 10 秒真实主动成交额；无成交时几乎不开火
-      s.cool -= dt * (this.activity[s.side] || 0);
+      s.cool -= dt * (s.ranged ? Math.max(this.activity[s.side] || 0, 0.3) : (this.activity[s.side] || 0)); // 弓兵保底射速：后排一直有箭雨
       if (!nearFront && s.cool < 0) s.cool = 0;
       if (nearFront && s.cool <= 0) { this._shoot(s); s.cool = rand(0.9, 1.8); }
     }

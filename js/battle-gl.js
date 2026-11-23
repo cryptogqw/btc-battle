@@ -1,16 +1,16 @@
 // 战场动画 WebGL 版（PixiJS）：模拟逻辑完全沿用 battle.js 的 Battle（前线、兵力、炮弹、爆炸都由行情驱动），这里只负责绘制。绘制。
 // 奇幻战场：人族（蓝金，左）对兽族（红黑，右），步兵/弓兵/骑兵由 3D 模型渲染的精灵图，背景见 fantasy-art.js。
 // PixiJS 按需动态加载；加载失败、WebGL 不可用或显卡上下文丢失时自动退回经典 Canvas 2D 版；?fx=classic 强制经典版。
-import { Battle, COL, colOf, clamp, lerp, rand, TAU, makeGlow, makeSmoke } from './battle.js?v=f7b28f84';
-import { t as tr } from './i18n.js?v=f7b28f84';
-import { drawSkyGround, drawFarLayer, drawNearLayer, drawForeground, towerTex } from './fantasy-art.js?v=f7b28f84';
+import { Battle, COL, colOf, clamp, lerp, rand, TAU, makeGlow, makeSmoke } from './battle.js?v=556a4503';
+import { t as tr } from './i18n.js?v=556a4503';
+import { drawSkyGround, drawFarLayer, drawNearLayer, drawForeground, towerTex } from './fantasy-art.js?v=556a4503';
 
 const ASSET_V = '4';
 // 手绘（ChatGPT）新素材：覆盖对应阵营的兵种；ONLY 表示该阵营暂时只显示这个兵种（其余兵种的新素材画好前，避免两种画风混在一起）
 const EXTRA = { blue: ['human_inf', 'human_arc', 'human_cav'], red: ['orc_inf', 'orc_arc', 'orc_cav'] };
 const ONLY = {}; // 军队贴图版本号（更新 assets/units 后加一）
 const UNIT_K = 0.42; // 精灵像素 → 战场单位（sc=1 时）
-const PIXI_URL = './vendor/pixi.js?v=f7b28f84';
+const PIXI_URL = './vendor/pixi.js?v=556a4503';
 
 // ---------- 小工具 ----------
 function rng32(seed) { // 固定种子随机数：同一屏幕尺寸下背景每次生成都一样，窗口缩放时不会“换一座城”
@@ -113,6 +113,7 @@ function hGradTex(c0, c1) {
   const c = mk(128, 2), x = c.getContext('2d'); const g = x.createLinearGradient(0, 0, 128, 0);
   g.addColorStop(0, c0); g.addColorStop(1, c1); x.fillStyle = g; x.fillRect(0, 0, 128, 2); return c;
 }
+const d2 = (x, y) => Math.hypot(x, y);
 function arrowTex() { // 箭：木杆 + 箭头 + 尾羽（朝 +x）
   const c = mk(48, 8), x = c.getContext('2d');
   x.fillStyle = '#d9c9a6'; x.fillRect(6, 3, 34, 2); x.fillStyle = '#e8eef5'; x.beginPath(); x.moveTo(48, 4); x.lineTo(39, 0.5); x.lineTo(39, 7.5); x.closePath(); x.fill();
@@ -225,7 +226,13 @@ export class GLBattle extends Battle {
   _bullet(side, sx, sy, tx, ty, big) {
     super._bullet(side, sx, sy, tx, ty, big);
     const b = this.bullets[this.bullets.length - 1];
-    if (b && this.gl) { b.T = b.life; b.melee = !!this._melee; b.arc = Math.min(80, Math.hypot(tx - sx, ty - sy) * 0.28); }
+    if (!b || !this.gl) return;
+    b.melee = !!this._melee;
+    if (!b.melee) { // 箭飞得慢一些、弧线高一些，肉眼才看得见（命中只在落点结算，不影响战斗）
+      const d = Math.hypot(tx - sx, ty - sy) || 1, sp = rand(300, 380);
+      b.vx = (tx - sx) / d * sp; b.vy = (ty - sy) / d * sp; b.life = d / sp;
+    }
+    b.T = b.life; b.arc = b.melee ? 0 : Math.min(130, d2(tx - sx, ty - sy) * 0.38);
   }
   _glFail() {
     this.gl = false;
@@ -448,8 +455,11 @@ export class GLBattle extends Battle {
       if (b.melee) continue; // 近战劈砍不画弹道
       const T = b.T || 0.3, k = clamp(1 - b.life / T, 0, 1), arc = b.arc || 0;
       const y = b.y - arc * 4 * k * (1 - k), dy = b.vy - arc * 4 * (1 - 2 * k) / T; // 抛物线高度与切线方向
-      const a = pl.bulletLines.get(tx.arrow); a.anchor.set(0.85, 0.5); a.position.set(b.x, y); a.width = 17; a.height = 3.2;
-      a.rotation = Math.atan2(dy, b.vx); a.tint = b.side === 'blue' ? 0xfff4d8 : 0xffd0c0; a.alpha = 1;
+      const rot = Math.atan2(dy, b.vx), us = this.us;
+      const tr = pl.sparks.get(); tr.anchor.set(1, 0.5); tr.position.set(b.x, y); tr.rotation = rot; tr.width = 26 * us; tr.height = 2; // 箭尾淡淡的划痕
+      tr.tint = b.side === 'blue' ? 0x9cc4ff : 0xff9a70; tr.alpha = 0.45;
+      const a = pl.bulletLines.get(tx.arrow); a.anchor.set(0.85, 0.5); a.position.set(b.x, y); a.width = 24 * us; a.height = 4.5 * us;
+      a.rotation = rot; a.tint = b.side === 'blue' ? 0xfff4d8 : 0xffd0c0; a.alpha = 1;
     }
     for (const p of this.parts) {
       const k = clamp(p.life / p.max, 0, 1);
