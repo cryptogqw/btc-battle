@@ -1,11 +1,11 @@
 // 战场动画 WebGL 版（PixiJS）：模拟逻辑完全沿用 battle.js 的 Battle（前线、兵力、炮弹、爆炸都由行情驱动），这里只负责绘制。绘制。
 // 奇幻战场：人族（蓝金，左）对兽族（红黑，右），步兵/弓兵/骑兵为手绘精灵；背景为手绘场景图（昼夜见 daynight.js），加载前/失败时用 fantasy-art.js 程序绘制。
 // PixiJS 按需动态加载；加载失败、WebGL 不可用或显卡上下文丢失时自动退回经典 Canvas 2D 版；?fx=classic 强制经典版。
-import { Battle, COL, colOf, clamp, lerp, rand, TAU, makeGlow, makeSmoke } from './battle.js?v=4315b376';
-import { t as tr } from './i18n.js?v=4315b376';
-import { drawSkyGround, drawFarLayer, drawNearLayer, drawForeground, towerTex } from './fantasy-art.js?v=4315b376';
-import { skyState, moonPhase, moonCanvas, moonLit, sunTex, raysTex, duskTex } from './daynight.js?v=4315b376';
-import { wxStep, wxMul, drawWeather, beamTex } from './weather.js?v=4315b376';
+import { Battle, COL, colOf, clamp, lerp, rand, TAU, makeGlow, makeSmoke } from './battle.js?v=cf5b9bb6';
+import { t as tr } from './i18n.js?v=cf5b9bb6';
+import { drawSkyGround, drawFarLayer, drawNearLayer, drawForeground, towerTex } from './fantasy-art.js?v=cf5b9bb6';
+import { skyState, moonPhase, moonCanvas, moonLit, sunTex, raysTex, duskTex } from './daynight.js?v=cf5b9bb6';
+import { wxStep, wxMul, drawWeather, beamTex } from './weather.js?v=cf5b9bb6';
 
 const ASSET_V = '6';
 // 手绘（ChatGPT）新素材：覆盖对应阵营的兵种；ONLY 表示该阵营暂时只显示这个兵种（其余兵种的新素材画好前，避免两种画风混在一起）
@@ -31,7 +31,7 @@ const QUALITY = { 2: { res: 2, parts: 600, stars: 110, rays2: 1, wash: 1, rays: 
   1: { res: 1.5, parts: 320, stars: 70, rays2: 0, wash: 0, rays: 1, vig: 1, tint: 1, march: 1 },
   0: { res: 1, parts: 160, stars: 40, rays2: 0, wash: 0, rays: 0, vig: 0, tint: 0, march: 0.5 } };
 const QPARAM = { low: 0, mid: 1, high: 2 }[new URLSearchParams(location.search).get('q')]; // 精灵像素 → 战场单位（sc=1 时）
-const PIXI_URL = './vendor/pixi.js?v=4315b376';
+const PIXI_URL = './vendor/pixi.js?v=cf5b9bb6';
 
 // ---------- 小工具 ----------
 function rng32(seed) { // 固定种子随机数：同一屏幕尺寸下背景每次生成都一样，窗口缩放时不会“换一座城”
@@ -288,6 +288,8 @@ export class GLBattle extends Battle {
     const midY = lerp(this.laneTop, this.laneBot, 0.5);
     if (this.camFollow) { tz = W < 600 ? 1.5 : 1.3; tcx = this.frontX(midY); tcy = midY - (this.laneBot - this.laneTop) * 0.1; }
     if (this.surgeT > 0.02) { const dir = this.lastSurge === 'blue' ? 1 : -1, k = this.surgeT; tz = Math.max(tz, lerp(tz, 1.07, k)); tcx = lerp(tcx, this.frontX(midY) + dir * W * 0.1, 0.55 * k); tcy = lerp(tcy, midY, 0.4 * k); }
+    const wv = this.wxv, big = wv ? Math.max(wv.erupt, wv.glory) : 0; // 火山喷发 / 圣光时镜头退回全景，别把火山、城堡切出画面
+    if (big > 0.01 && !this.camFollow) { tz = lerp(tz, 1.0, big); tcx = lerp(tcx, W / 2, big); tcy = lerp(tcy, H / 2, big); }
     const e = this.camEv;
     if (e) {
       const a = rt - e.t0;

@@ -4,7 +4,7 @@
 //   薄雾 ← 成交清淡；整体色调 ← 24 小时涨跌（涨偏暖金、跌偏暗红）。
 // 目标值由 app.js 按行情算好传进来（battle.setWeather），这里负责平滑过渡和绘制。
 // 预览：?wx=storm | rain | erupt | blood | glory | fog | up | down，可用逗号组合，如 ?wx=storm,down
-import { clamp, lerp, rand } from './battle.js?v=4315b376';
+import { clamp, lerp, rand } from './battle.js?v=cf5b9bb6';
 
 const mix = (a, b, k) => {
   const r = lerp(a >> 16, b >> 16, k), g = lerp((a >> 8) & 255, (b >> 8) & 255, k), bl = lerp(a & 255, b & 255, k);
@@ -98,7 +98,7 @@ export function drawWeather(b, dt, toScr, ss, D) {
 
   // ---- 火山喷发 / 血月 ----
   const er = v.erupt, bl = v.blood, C = b._crater;
-  rect(0x7a1a0c, 0.3 * er); rect(0x4a0606, 0.3 * bl);
+  rect(0x7a1a0c, (0.3 + 0.12 * D) * er); rect(0x4a0606, 0.3 * bl); // 白天天空亮，红幕加深一点
   const mo = b.bgs && b.bgs.moon;
   if (bl > 0.01 && mo && mo.visible) { // 血月：盖在红色天幕之上，发出暗红的光
     const h = pl.wxSkyAdd.get(tx.white); h.anchor.set(0.5); h.position.set(mo.x, mo.y); h.width = h.height = mo.width * 7; h.tint = 0xff2a10; h.alpha = 0.55 * bl * mo.alpha;

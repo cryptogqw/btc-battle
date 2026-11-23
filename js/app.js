@@ -1,10 +1,10 @@
-import { FeedManager, SOURCES, fetchMiniTickers, fetchBinance1s, fetchBinanceAggTrades } from './feeds.js?v=4315b376';
-import { PRESET, universe, loadUniverse, loadTickers, fetchQuoteVolume, thresholdsFor, search as searchCoins, topByVolume, recents, pushRecent, favorites, toggleFav, primarySource } from './markets.js?v=4315b376';
-import { GLBattle } from './battle-gl.js?v=4315b376';
-import { t as T, lang, setLang, onLang, applyI18n, fmtUsd, fmtShort, fmtNum } from './i18n.js?v=4315b376';
-import { AudioController } from './music.js?v=4315b376';
-import { skyState } from './daynight.js?v=4315b376';
-import { initChat } from './chat.js?v=4315b376';
+import { FeedManager, SOURCES, fetchMiniTickers, fetchBinance1s, fetchBinanceAggTrades } from './feeds.js?v=cf5b9bb6';
+import { PRESET, universe, loadUniverse, loadTickers, fetchQuoteVolume, thresholdsFor, search as searchCoins, topByVolume, recents, pushRecent, favorites, toggleFav, primarySource } from './markets.js?v=cf5b9bb6';
+import { GLBattle } from './battle-gl.js?v=cf5b9bb6';
+import { t as T, lang, setLang, onLang, applyI18n, fmtUsd, fmtShort, fmtNum } from './i18n.js?v=cf5b9bb6';
+import { AudioController } from './music.js?v=cf5b9bb6';
+import { skyState } from './daynight.js?v=cf5b9bb6';
+import { initChat } from './chat.js?v=cf5b9bb6';
 
 const $ = (id) => document.getElementById(id);
 const pad = (n) => String(n).padStart(2, '0');
