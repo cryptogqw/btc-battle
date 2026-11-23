@@ -1,10 +1,10 @@
 // 战场动画 WebGL 版（PixiJS）：模拟逻辑完全沿用 battle.js 的 Battle（前线、兵力、炮弹、爆炸都由行情驱动），这里只负责绘制。绘制。
 // 奇幻战场：人族（蓝金，左）对兽族（红黑，右），步兵/弓兵/骑兵为手绘精灵；背景为手绘场景图（昼夜见 daynight.js），加载前/失败时用 fantasy-art.js 程序绘制。
 // PixiJS 按需动态加载；加载失败、WebGL 不可用或显卡上下文丢失时自动退回经典 Canvas 2D 版；?fx=classic 强制经典版。
-import { Battle, COL, colOf, clamp, lerp, rand, TAU, makeGlow, makeSmoke } from './battle.js?v=60a53bd5';
-import { t as tr } from './i18n.js?v=60a53bd5';
-import { drawSkyGround, drawFarLayer, drawNearLayer, drawForeground, towerTex } from './fantasy-art.js?v=60a53bd5';
-import { skyState, moonPhase, moonCanvas, moonLit, sunTex, raysTex, duskTex } from './daynight.js?v=60a53bd5';
+import { Battle, COL, colOf, clamp, lerp, rand, TAU, makeGlow, makeSmoke } from './battle.js?v=328d3470';
+import { t as tr } from './i18n.js?v=328d3470';
+import { drawSkyGround, drawFarLayer, drawNearLayer, drawForeground, towerTex } from './fantasy-art.js?v=328d3470';
+import { skyState, moonPhase, moonCanvas, moonLit, sunTex, raysTex, duskTex } from './daynight.js?v=328d3470';
 
 const ASSET_V = '6';
 // 手绘（ChatGPT）新素材：覆盖对应阵营的兵种；ONLY 表示该阵营暂时只显示这个兵种（其余兵种的新素材画好前，避免两种画风混在一起）
@@ -30,7 +30,7 @@ const QUALITY = { 2: { res: 2, parts: 600, stars: 110, rays2: 1, wash: 1, rays: 
   1: { res: 1.5, parts: 320, stars: 70, rays2: 0, wash: 0, rays: 1, vig: 1, tint: 1, march: 1 },
   0: { res: 1, parts: 160, stars: 40, rays2: 0, wash: 0, rays: 0, vig: 0, tint: 0, march: 0.5 } };
 const QPARAM = { low: 0, mid: 1, high: 2 }[new URLSearchParams(location.search).get('q')]; // 精灵像素 → 战场单位（sc=1 时）
-const PIXI_URL = './vendor/pixi.js?v=60a53bd5';
+const PIXI_URL = './vendor/pixi.js?v=328d3470';
 
 // ---------- 小工具 ----------
 function rng32(seed) { // 固定种子随机数：同一屏幕尺寸下背景每次生成都一样，窗口缩放时不会“换一座城”
@@ -79,6 +79,13 @@ function fadeLineTex() { // 一端实一端透明，用于冲锋速度线
   const c = mk(64, 2), x = c.getContext('2d');
   const g = x.createLinearGradient(0, 0, 64, 0); g.addColorStop(0, '#fff'); g.addColorStop(1, 'rgba(255,255,255,0)');
   x.fillStyle = g; x.fillRect(0, 0, 64, 2); return c;
+}
+function tailTex() { // 陨石尾焰：头部实、向后渐隐，上下边缘柔和
+  const c = mk(128, 32), x = c.getContext('2d');
+  const g = x.createLinearGradient(0, 0, 128, 0); g.addColorStop(0, '#fff'); g.addColorStop(0.25, 'rgba(255,255,255,0.7)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = g; x.fillRect(0, 0, 128, 32);
+  const v = x.createLinearGradient(0, 0, 0, 32); v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(0.5, '#000'); v.addColorStop(1, 'rgba(0,0,0,0)');
+  x.globalCompositeOperation = 'destination-in'; x.fillStyle = v; x.fillRect(0, 0, 128, 32); return c;
 }
 function ringTex() {
   const c = mk(128, 128), x = c.getContext('2d');
@@ -211,9 +218,8 @@ export class GLBattle extends Battle {
     };
     const loadOne = async (name) => { const [meta, im] = await Promise.all([fetch(`${base}${name}.json?v=${ASSET_V}`).then((r) => r.json()), tryImg(name)]); return { meta, im }; };
     const armies = {};
-    await Promise.all([['blue', 'human'], ['red', 'orc']].map(async ([side, name]) => {
-      const units = {}, got = await Promise.all(EXTRA[side].map((e) => loadOne(e).catch((err) => { console.warn('新素材加载失败', e, err); return null; })));
-      if (['inf', 'arc', 'cav'].some((u) => !got.some((g) => g && g.meta.units[u]))) { const a = await loadOne(`army_${name}`); addAtlas(units, a.meta, a.im); }
+    await Promise.all(['blue', 'red'].map(async (side) => { // 某个兵种加载失败时，该兵种退回程序绘制的小人
+      const units = {}, got = await Promise.all(EXTRA[side].map((e) => loadOne(e).catch((err) => { console.warn('军队图集加载失败', e, err); return null; })));
       for (const g of got) if (g) addAtlas(units, g.meta, g.im);
       armies[side] = { meta: { foot_y: 0 }, units };
     }));
@@ -238,13 +244,43 @@ export class GLBattle extends Battle {
     // 另一张（白天/黑夜）在临近晨昏时才加载；电脑上空闲时也顺手加载
     if (this.qMax === 2 && this.q === 2) setTimeout(() => this._bgOther && this._bgOther(), 4000);
   }
-  // ---------- 施法者：人族魔法师在后方放法球、兽族飞龙飞到前线喷火球，替代原来的投石（投石 / 巨石级大单） ----------
+  // ---------- 施法者：人族魔法师在后方放法球、兽族飞龙飞到前线喷火球，对应投石 / 巨石级大单 ----------
   _casterU(side) { const A = this.gl && this.units && this.units[side]; return A && A.units[side === 'blue' ? 'mage' : 'dragon']; }
   _muzzle(...a) { if (!this._noMuzzle) super._muzzle(...a); }
   _shell(side, usd, kind) {
-    if (kind === 'whale' || !this._casterU(side)) return super._shell(side, usd, kind);
+    if (kind === 'whale') { // 巨鲸：主陨石之外，再落下几颗小陨石（只是声势，伤害小、不飘数字）
+      super._shell(side, usd, kind);
+      const q = (this.meteorQ ||= []), n = this.q === 0 ? 2 : 4;
+      for (let i = 0; i < n; i++) q.push({ at: this.t + 0.12 + i * rand(0.12, 0.24), side });
+      return;
+    }
+    if (!this._casterU(side)) return super._shell(side, usd, kind);
     const c = this._caster(side);
     if (c.queue.length >= 5 && c.st !== 'in') this._launch(c, { usd, kind }); else c.queue.push({ usd, kind }); // 大单扎堆时不再排队，直接发射
+  }
+  _spawnMeteor(side) {
+    const blue = side === 'blue', ty = rand(this.laneTop, this.laneBot), fx = this.frontX(ty), eb = blue ? this.baseR : this.baseL;
+    const tx = lerp(fx + (blue ? 20 : -20), eb, Math.random() * 0.8), sx = blue ? rand(-60, this.W * 0.3) : rand(this.W * 0.7, this.W + 60);
+    this.shells.push({ side, usd: 0, kind: 'shell', fall: true, power: rand(1.6, 2.4), noText: true, sx, sy: -40, tx, ty, t: 0, T: rand(0.6, 0.85), x: sx, y: -40, h: 0 });
+  }
+  update(dt) {
+    super.update(dt);
+    const q = this.meteorQ; if (q && q.length) for (let i = q.length - 1; i >= 0; i--) if (this.t >= q[i].at) { this._spawnMeteor(q[i].side); q.splice(i, 1); }
+  }
+  // 胜利：人族是金色圣光迸发，兽族是熔岩火焰喷发（替代原来的烟花）
+  _firework(side) {
+    if (!this.gl) return super._firework(side);
+    const blue = side === 'blue', x = rand(this.W * 0.1, this.W * 0.9), y = rand(this.H * 0.08, this.horizon * 0.85), us = this.us || 1;
+    const cols = blue ? ['#ffe08a', '#fff4d0', '#bfe0ff', '#ffd27a'] : ['#ff8a3a', '#ffb050', '#ff5a20', '#ffd27a'];
+    this.parts.push({ type: 'glow', spr: blue ? 'white' : 'fire', x, y, vx: 0, vy: 0, life: 0.4, max: 0.4, size: 70 * us, add: true, grow: 1 });
+    this.parts.push({ type: 'glow', spr: side, x, y, vx: 0, vy: 0, life: 0.7, max: 0.7, size: 110 * us, add: true, grow: 1.3 });
+    const n = this.q === 0 ? 22 : 38;
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * TAU + rand(-0.08, 0.08), sp = rand(70, 170) * us;
+      this.parts.push({ type: 'spark', x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - (blue ? 40 : 0), life: rand(0.7, 1.3), max: 1.3, col: cols[i % cols.length], w: blue ? 1.8 : 2.2 });
+    }
+    if (blue) for (let i = 0; i < 8; i++) this.parts.push({ type: 'glow', spr: 'white', x: x + rand(-40, 40) * us, y: y + rand(-30, 30) * us, vx: rand(-8, 8), vy: -rand(20, 50), life: rand(0.8, 1.4), max: 1.4, size: rand(8, 16) * us, add: true }); // 缓缓上升的光点
+    else for (let i = 0; i < 5; i++) this._smoke(x + rand(-20, 20), y, rand(10, 18) * us, rand(-15, 15), rand(-25, -5), rand(1.2, 2));
   }
   _caster(side) { // 找一个空闲的施法者，没有就召唤一个（数量有上限，多了就排队连发）
     const mine = this.casters.filter((c) => c.side === side && c.st !== 'out');
@@ -283,7 +319,7 @@ export class GLBattle extends Battle {
   _casterK(c, U) { return c.side === 'blue' ? U.k * 1.15 * this.scaleAt(c.y) * this.us : U.k * this.us * (0.75 + 0.35 * clamp(c.y / this.horizon, 0, 1.2)); }
   _launch(c, job) {
     const [sx, sy] = this._castPoint(c), blue = c.side === 'blue';
-    this._noMuzzle = true; super._shell(c.side, job.usd, job.kind); this._noMuzzle = false;
+    this._noMuzzle = true; this._mini = !!job.mini; super._shell(c.side, job.usd, job.kind); this._noMuzzle = this._mini = false;
     const s = this.shells[this.shells.length - 1]; if (!s) return;
     s.sx = s.x = sx; s.sy = s.y = sy; s.cast = blue ? 'mage' : 'dragon'; s.noText = !!job.mini;
     if (!blue) s.tx = Math.min(s.tx, c.x - 20); // 火球只往前（人族方向）喷
@@ -395,7 +431,7 @@ export class GLBattle extends Battle {
     const T = (c) => P.Texture.from(c, true);
     this.tx = {
       blue: T(glowTex(...COL.blue.glow)), red: T(glowTex(...COL.red.glow)), fire: T(glowTex(255, 160, 50)), white: T(glowTex(255, 240, 220)),
-      smoke: T(makeSmoke()), cloud: T(smokeCloudTex()), line: T(lineTex()), fline: T(fadeLineTex()), ring: T(ringTex()),
+      smoke: T(makeSmoke()), cloud: T(smokeCloudTex()), line: T(lineTex()), fline: T(fadeLineTex()), tail: T(tailTex()), ring: T(ringTex()),
       shadow: T(shadowTex()), crater: T(craterTex()), edge: T(edgeTex()), arrow: T(arrowTex()),
       skyGlow: T(skyGlowTex()), sun: T(sunTex()), rays: T(raysTex()), dusk: T(duskTex()),
       tintB: T(hGradTex('rgba(37,99,235,0.16)', 'rgba(37,99,235,0.02)')), tintR: T(hGradTex('rgba(220,38,38,0.02)', 'rgba(220,38,38,0.16)')),
@@ -445,7 +481,7 @@ export class GLBattle extends Battle {
       baseGlow: pool(L.bases, this.tx.blue, 'add'), shadows: pool(L.units, this.tx.shadow), soldiers: pool(L.units, this.tx.soldier.blue.idle),
       unitGlow: pool(L.units, this.tx.blue, 'add'), smoke: pool(L.smoke, this.tx.smoke),
       bulletLines: pool(L.debris, this.tx.arrow), glows: pool(L.fx, this.tx.white, 'add'), sparks: pool(L.fx, this.tx.line, 'add'),
-      shells: pool(L.fx, this.tx.white, 'add'), rings: pool(L.fx, this.tx.ring, 'add'), streaks: pool(L.fx, this.tx.fline, 'add'),
+      shells: pool(L.fx, this.tx.white, 'add'), rings: pool(L.fx, this.tx.ring, 'add'), streaks: pool(L.fx, this.tx.fline, 'add'), tails: pool(L.fx, this.tx.tail, 'add'),
       embers: pool(L.fx, P.Texture.WHITE, 'add'), debris: pool(L.debris, P.Texture.WHITE),
       stars: this.bgs.stars, bgLights: pool(L.fires, this.tx.fire, 'add'),
       march: pool(L.march, P.Texture.EMPTY), casters: pool(L.units, P.Texture.EMPTY), casterFx: pool(L.units, this.tx.white, 'add'), air: pool(L.air, P.Texture.EMPTY), airFx: pool(L.air, this.tx.fire, 'add'),
@@ -476,7 +512,7 @@ export class GLBattle extends Battle {
       for (const k of ['bg', 'far', 'near', 'fg']) { const o = this.sp[k].texture; if (o && o !== P.Texture.EMPTY) { this.sp[k].texture = P.Texture.EMPTY; o.destroy(true); } }
       this.wrecks = this.wrecks || []; this.farFires = []; this.nearFires = []; this.fgH = this.fgH || 30;
     } else {
-    // 天空 + 地面（左草地、右火山灰）+ 远处的投石车残骸
+    // 天空 + 地面（左草地、右火山灰）+ 远处的战车残骸（背景图加载前 / 失败时的程序背景）
     {
       const c = mk(W * s, H * s), x = c.getContext('2d'); x.scale(s, s);
       this.wrecks = drawSkyGround(x, W, H, hz, this.laneTop, rng32(seed));
@@ -693,6 +729,17 @@ export class GLBattle extends Battle {
         const m = pl.shells.get(tx.fire); m.position.set(s.x, s.y); m.width = m.height = 26 * big; m.tint = 0xffc060;
         const c = pl.shells.get(tx.white); c.position.set(s.x, s.y); c.width = c.height = 12 * big;
         if (Math.random() < 0.7) this.parts.push({ type: 'spark', x: s.x, y: s.y, vx: rand(-30, 60), vy: rand(-60, 10), life: 0.45, max: 0.45, col: Math.random() < 0.5 ? '#ffb040' : '#ff6a20', w: 1.8 });
+        continue;
+      }
+      if (s.kind === 'whale' || s.fall) { // 陨石：人族是金白色的星陨，兽族是暗红的熔岩陨石；尾焰沿来路拖长
+        const blue = s.side === 'blue', us = this.us, ang = Math.atan2(s.ty - s.sy, s.tx - s.sx) + Math.PI;
+        for (const [len, th, col, al] of [[170, 34, blue ? 0xffd27a : 0xff4a10, 0.6], [100, 14, blue ? 0xffffff : 0xffc060, 0.9]]) {
+          const l = pl.tails.get(); l.anchor.set(0.04, 0.5); l.position.set(s.x, s.y); l.rotation = ang; l.width = len * big * 0.5 * us; l.height = th * big * 0.5 * us; l.tint = col; l.alpha = al;
+        }
+        const o = pl.shells.get(tx.fire); o.position.set(s.x, s.y); o.width = o.height = 44 * big; o.tint = blue ? 0xffd27a : 0xff4a10;
+        const c = pl.shells.get(tx.white); c.position.set(s.x, s.y); c.width = c.height = 14 * big;
+        const g = pl.shells.get(tx[s.side]); g.position.set(s.x, s.y); g.width = g.height = 30 * big; g.alpha = 0.5;
+        if (Math.random() < 0.8) this.parts.push({ type: 'spark', x: s.x, y: s.y, vx: rand(-40, 40), vy: rand(-60, 0), life: 0.5, max: 0.5, col: blue ? (Math.random() < 0.5 ? '#ffe08a' : '#ffffff') : (Math.random() < 0.5 ? '#ff8a3a' : '#ffd27a'), w: 1.8 });
         continue;
       }
       const o = pl.shells.get(tx.fire); o.position.set(s.x, s.y); o.width = o.height = 40 * big; o.tint = 0xff7a30;

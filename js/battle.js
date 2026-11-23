@@ -1,5 +1,5 @@
 // 战场动画：Canvas 2D，蓝军（多）在左，红军（空）在右
-import { t as tr, fmtUsd } from './i18n.js?v=60a53bd5';
+import { t as tr, fmtUsd } from './i18n.js?v=328d3470';
 const TAU = Math.PI * 2;
 const rand = (a, b) => a + Math.random() * (b - a);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -250,6 +250,7 @@ export class Battle {
       s.sx = blue ? rand(-60, this.W * 0.2) : rand(this.W * 0.8, this.W + 60); s.sy = -40;
     } else {
       this._muzzle(sx, sy, side, kind === 'heavy' ? 1.6 : 1);
+      this.onCast && this.onCast(side, kind, !!this._mini); // 施法 / 发射音效
     }
     this.shells.push(s);
   }
@@ -424,7 +425,7 @@ export class Battle {
     for (const s of this.shells) {
       s.t += dt; const k = Math.min(s.t / s.T, 1);
       const px = s.x, py = s.y;
-      if (s.kind === 'whale') { const e = k * k; s.x = lerp(s.sx, s.tx, e); s.y = lerp(s.sy, s.ty, e); }
+      if (s.kind === 'whale' || s.fall) { const e = k * k; s.x = lerp(s.sx, s.tx, e); s.y = lerp(s.sy, s.ty, e); }
       else { s.x = lerp(s.sx, s.tx, k); s.y = lerp(s.sy, s.ty, k) - s.h * 4 * k * (1 - k); }
       s.ang = Math.atan2(s.y - py, s.x - px);
       const trailN = s.kind === 'whale' ? 4 : s.kind === 'heavy' ? 2 : 1;
@@ -434,8 +435,9 @@ export class Battle {
       }
       if (k >= 1) {
         s.done = true;
-        const power = s.kind === 'whale' ? clamp(6 + Math.log10(s.usd / this.th.whale) * 4, 6, 10) : s.kind === 'heavy' ? clamp(3 + Math.log10(s.usd / this.th.heavy) * 3, 3, 5.5) : clamp(1 + Math.log10(s.usd / this.th.shell) * 2, 1, 2.8);
+        const power = s.power != null ? s.power : s.kind === 'whale' ? clamp(6 + Math.log10(s.usd / this.th.whale) * 4, 6, 10) : s.kind === 'heavy' ? clamp(3 + Math.log10(s.usd / this.th.heavy) * 3, 3, 5.5) : clamp(1 + Math.log10(s.usd / this.th.shell) * 2, 1, 2.8);
         this.explode(s.x, s.y, s.side, power, { whale: s.kind === 'whale' });
+        if (s.kind !== 'whale' && this.onBoom) this.onBoom(s.side, power); // 巨鲸的落地声已包含在它自己的音效里
         // 伤害数字
         const lvl = s.kind === 'whale' ? 3 : s.kind === 'heavy' ? 2 : 1;
         if (!s.noText) this.texts.push({ x: s.x + rand(-10, 10), y: s.y - 24, vx: rand(-14, 14), txt: (lvl === 3 ? tr('crit') : '-') + fmtUsd(s.usd), side: s.side, life: 1.4 + lvl * 0.3, max: 1.4 + lvl * 0.3, lvl });

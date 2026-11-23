@@ -185,8 +185,19 @@ export class WarMusic {
   level() { this.an.getFloatTimeDomainData(this._abuf); let e = 0; for (const v of this._abuf) e += v * v; return Math.sqrt(e / this._abuf.length); }
 
   // ---------- 特殊事件 ----------
-  whale(t = this.ctx.currentTime + 0.02, side = 'blue') { // 巨鲸空袭爆炸
-    const c = this.ctx;
+  whale(t0 = this.ctx.currentTime + 0.02, side = 'blue') { // 巨鲸：陨火呼啸坠落（约 0.85 秒）→ 落地巨响
+    const c = this.ctx, bus = this.sfxOn ? 'sfx' : 'music', fall = 0.85;
+    // 坠落呼啸：下滑的哨音 + 越来越响的风声
+    const wo = c.createOscillator(); wo.type = 'sine'; wo.frequency.setValueAtTime(1900, t0); wo.frequency.exponentialRampToValueAtTime(260, t0 + fall);
+    const wg = c.createGain(); wg.gain.setValueAtTime(0.0001, t0); wg.gain.exponentialRampToValueAtTime(0.07, t0 + fall * 0.8); wg.gain.exponentialRampToValueAtTime(0.0001, t0 + fall + 0.03);
+    wo.connect(wg); wo.start(t0); wo.stop(t0 + fall + 0.05);
+    const wn = this._noiseSrc(t0, fall), bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 2.5;
+    bp.frequency.setValueAtTime(3200, t0); bp.frequency.exponentialRampToValueAtTime(500, t0 + fall);
+    const wng = c.createGain(); wng.gain.setValueAtTime(0.0001, t0); wng.gain.exponentialRampToValueAtTime(0.35, t0 + fall * 0.9); wng.gain.exponentialRampToValueAtTime(0.0001, t0 + fall + 0.03);
+    wn.connect(bp).connect(wng);
+    this._out(wg, bus, 0.3); this._out(wng, bus, 0.4);
+    const t = t0 + fall;
+    this._fireCrackle(t + 0.1, 1.6, 0.5, bus);
     const o = c.createOscillator(); o.type = 'sine'; o.frequency.setValueAtTime(90, t); o.frequency.exponentialRampToValueAtTime(24, t + 1.6);
     const g = c.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(1.0, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + 1.8);
     o.connect(g); o.start(t); o.stop(t + 1.9);
@@ -194,18 +205,66 @@ export class WarMusic {
     lp.frequency.setValueAtTime(2400, t); lp.frequency.exponentialRampToValueAtTime(180, t + 1.4);
     const ng = c.createGain(); ng.gain.setValueAtTime(0.7, t); ng.gain.exponentialRampToValueAtTime(0.0001, t + 1.5);
     nz.connect(lp).connect(ng);
-    const bus = this.sfxOn ? 'sfx' : 'music';
     this._out(g, bus, 0.4); this._out(ng, bus, 0.6);
     this.taiko(t, 1, bus, 1.2); this.cymbal(t + 0.02, 3, 0.8, false, bus);
     if (this.musicOn) this.brass(t + 0.05, side === 'blue' ? 50 : 45, 0.9, 1, side === 'blue' ? 57 : 38);
   }
-  impact(usd, side, t = this.ctx.currentTime + 0.01) { // 大单炮弹音效
-    const c = this.ctx, k = clamp(Math.log10(usd / 50000) / 2, 0, 1.2);
-    const nz = this._noiseSrc(t, 0.3 + k * 0.5), lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 700 - k * 300;
-    const g = c.createGain(); g.gain.setValueAtTime(0.35 + k * 0.4, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3 + k * 0.5);
+  // 火焰噼啪：稀疏的高频短脉冲
+  _fireCrackle(t, dur, vel = 1, bus = 'sfx') {
+    const c = this.ctx, n = Math.round(dur * 26);
+    for (let i = 0; i < n; i++) {
+      const tt = t + Math.random() * dur, nz = this._noiseSrc(tt, 0.02), hp = c.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 1800 + Math.random() * 2500;
+      const g = c.createGain(), a = vel * (0.05 + Math.random() * 0.1) * (1 - (tt - t) / dur * 0.7);
+      g.gain.setValueAtTime(a, tt); g.gain.exponentialRampToValueAtTime(0.0001, tt + 0.015 + Math.random() * 0.02);
+      nz.connect(hp).connect(g); this._out(g, bus, 0.2);
+    }
+  }
+  spell(t = this.ctx.currentTime + 0.01, vel = 1) { // 人族魔法师施法：上行的水晶琶音 + 微光沙沙声 + 法球升起的嗡鸣
+    const c = this.ctx;
+    [86, 90, 93, 98].forEach((m, i) => {
+      const tt = t + i * 0.045;
+      for (const [type, det, a] of [['sine', 0, 1], ['triangle', 1200, 0.25]]) {
+        const o = c.createOscillator(); o.type = type; o.frequency.value = mtof(m); o.detune.value = det;
+        const g = c.createGain(); g.gain.setValueAtTime(0.0001, tt); g.gain.exponentialRampToValueAtTime(0.08 * vel * a, tt + 0.004); g.gain.exponentialRampToValueAtTime(0.0001, tt + 0.55);
+        o.connect(g); o.start(tt); o.stop(tt + 0.6); this._out(g, 'sfx', 0.9);
+      }
+    });
+    const nz = this._noiseSrc(t, 0.5), bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 3;
+    bp.frequency.setValueAtTime(4000, t); bp.frequency.exponentialRampToValueAtTime(9000, t + 0.45);
+    const ng = c.createGain(); ng.gain.setValueAtTime(0.0001, t); ng.gain.exponentialRampToValueAtTime(0.09 * vel, t + 0.08); ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
+    nz.connect(bp).connect(ng); this._out(ng, 'sfx', 0.7);
+    const o = c.createOscillator(); o.type = 'sine'; o.frequency.setValueAtTime(220, t); o.frequency.exponentialRampToValueAtTime(520, t + 0.35);
+    const g = c.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.12 * vel, t + 0.05); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.4);
+    o.connect(g); o.start(t); o.stop(t + 0.45); this._out(g, 'sfx', 0.5);
+  }
+  roar(t = this.ctx.currentTime + 0.01, vel = 1) { // 兽族飞龙喷火：低沉带颤动的龙吼 + 呼啦的喷火声
+    const c = this.ctx, dur = 0.55 + 0.35 * vel;
+    const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 650; bp.Q.value = 0.9;
+    const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.setValueAtTime(900, t); lp.frequency.linearRampToValueAtTime(2200, t + 0.12); lp.frequency.exponentialRampToValueAtTime(600, t + dur);
+    const g = c.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.32 * vel, t + 0.07); g.gain.setValueAtTime(0.28 * vel, t + dur * 0.5); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    // 喉音颤动：振幅调制
+    const am = c.createGain(); am.gain.value = 0.6; const lfo = c.createOscillator(); lfo.frequency.value = 31; const lg = c.createGain(); lg.gain.value = 0.4;
+    lfo.connect(lg).connect(am.gain); lfo.start(t); lfo.stop(t + dur + 0.05);
+    bp.connect(lp).connect(am).connect(g);
+    for (const [f0, det] of [[78, 0], [117, 9], [156, -7]]) {
+      const o = c.createOscillator(); o.type = 'sawtooth'; o.detune.value = det;
+      o.frequency.setValueAtTime(f0 * 0.8, t); o.frequency.linearRampToValueAtTime(f0 * 1.15, t + 0.12); o.frequency.exponentialRampToValueAtTime(f0 * 0.6, t + dur);
+      o.connect(bp); o.start(t); o.stop(t + dur + 0.05);
+    }
+    this._out(g, 'sfx', 0.35);
+    // 喷火：先呼啸后变低的噪声
+    const nz = this._noiseSrc(t + 0.05, dur), nb = c.createBiquadFilter(); nb.type = 'bandpass'; nb.Q.value = 0.7;
+    nb.frequency.setValueAtTime(2400, t + 0.05); nb.frequency.exponentialRampToValueAtTime(700, t + 0.05 + dur);
+    const ng = c.createGain(); ng.gain.setValueAtTime(0.0001, t + 0.05); ng.gain.exponentialRampToValueAtTime(0.3 * vel, t + 0.18); ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.05 + dur);
+    nz.connect(nb).connect(ng); this._out(ng, 'sfx', 0.3);
+  }
+  boom(power = 1, t = this.ctx.currentTime + 0.01) { // 法球 / 火球落地爆炸（power 1~5.5）
+    const c = this.ctx, k = clamp((power - 1) / 4, 0, 1.2);
+    const nz = this._noiseSrc(t, 0.3 + k * 0.5), lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 900 - k * 400;
+    const g = c.createGain(); g.gain.setValueAtTime(0.3 + k * 0.4, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3 + k * 0.5);
     nz.connect(lp).connect(g); this._out(g, 'sfx', 0.3);
-    const o = c.createOscillator(); o.frequency.setValueAtTime(side === 'blue' ? 120 : 100, t); o.frequency.exponentialRampToValueAtTime(40, t + 0.3);
-    const og = c.createGain(); og.gain.setValueAtTime(0.0001, t); og.gain.exponentialRampToValueAtTime(0.4 + k * 0.3, t + 0.005); og.gain.exponentialRampToValueAtTime(0.0001, t + 0.4);
+    const o = c.createOscillator(); o.frequency.setValueAtTime(110, t); o.frequency.exponentialRampToValueAtTime(38, t + 0.3);
+    const og = c.createGain(); og.gain.setValueAtTime(0.0001, t); og.gain.exponentialRampToValueAtTime(0.35 + k * 0.35, t + 0.005); og.gain.exponentialRampToValueAtTime(0.0001, t + 0.4);
     o.connect(og); o.start(t); o.stop(t + 0.45); this._out(og, 'sfx', 0.2);
   }
   fanfare(side, t = this.ctx.currentTime + 0.05) { // 胜利号角
@@ -348,7 +407,15 @@ export class AudioController {
   update(st) { if (this.engine) this.engine.setState(st); }
   tick(dir) { if (this.engine && this.engine.musicOn && this.running) this.engine.priceTick(dir); }
   whale(side) { if (this.on) this.engine.whale(undefined, side); }
-  impact(usd, side) { if (this.engine && this.engine.sfxOn && this.running) this.engine.impact(usd, side); }
+  get _sfx() { return this.engine && this.engine.sfxOn && this.running; }
+  // 施法 / 落地音效：大单扎堆时限流，避免糊成一片
+  _gate(key, gap) { const now = performance.now(), g = (this._g ||= {}); if (now - (g[key] || 0) < gap) return false; g[key] = now; return true; }
+  cast(side, kind, mini) {
+    if (!this._sfx || !this._gate('cast' + side, side === 'blue' ? 110 : 260)) return;
+    const vel = mini ? 0.5 : kind === 'heavy' ? 1.15 : 0.85;
+    if (side === 'blue') this.engine.spell(undefined, vel); else this.engine.roar(undefined, vel);
+  }
+  boom(power) { if (this._sfx && this._gate('boom', 90)) this.engine.boom(power); }
   fanfare(side) { if (this.engine && this.engine.musicOn && this.running) this.engine.fanfare(side); }
   surge(side) { if (this.engine && this.engine.musicOn && this.running) this.engine.surgeHit(side); }
 }

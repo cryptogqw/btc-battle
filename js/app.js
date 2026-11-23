@@ -1,9 +1,9 @@
-import { FeedManager, SOURCES, fetchMiniTickers, fetchBinance1s, fetchBinanceAggTrades } from './feeds.js?v=60a53bd5';
-import { PRESET, universe, loadUniverse, loadTickers, fetchQuoteVolume, thresholdsFor, search as searchCoins, topByVolume, recents, pushRecent, favorites, toggleFav, primarySource } from './markets.js?v=60a53bd5';
-import { GLBattle } from './battle-gl.js?v=60a53bd5';
-import { t as T, lang, setLang, onLang, applyI18n, fmtUsd, fmtShort, fmtNum } from './i18n.js?v=60a53bd5';
-import { AudioController } from './music.js?v=60a53bd5';
-import { initChat } from './chat.js?v=60a53bd5';
+import { FeedManager, SOURCES, fetchMiniTickers, fetchBinance1s, fetchBinanceAggTrades } from './feeds.js?v=328d3470';
+import { PRESET, universe, loadUniverse, loadTickers, fetchQuoteVolume, thresholdsFor, search as searchCoins, topByVolume, recents, pushRecent, favorites, toggleFav, primarySource } from './markets.js?v=328d3470';
+import { GLBattle } from './battle-gl.js?v=328d3470';
+import { t as T, lang, setLang, onLang, applyI18n, fmtUsd, fmtShort, fmtNum } from './i18n.js?v=328d3470';
+import { AudioController } from './music.js?v=328d3470';
+import { initChat } from './chat.js?v=328d3470';
 
 const $ = (id) => document.getElementById(id);
 const pad = (n) => String(n).padStart(2, '0');
@@ -132,7 +132,6 @@ function onMergedTrade(t) {
     S.big.unshift(r); if (S.big.length > 500) S.big.length = 500;
     if (t.usd >= S.threshold) addTradeRow(r);
   }
-  if (t.usd >= cfg().th.shell) audio.impact(t.usd * 50000 / cfg().th.shell, t.side === 'buy' ? 'blue' : 'red');
 }
 function tradeLi(t, anim = true) {
   const li = document.createElement('li'), d = new Date(t.ts), whale = t.usd >= cfg().th.whale;
@@ -465,6 +464,8 @@ function showBanner(html, cls, ms = 2200, force = false) {
   void banner.offsetWidth; banner.classList.add('show');
   clearTimeout(bannerT); bannerT = setTimeout(() => banner.classList.remove('show'), ms);
 }
+battle.onCast = (side, kind, mini) => audio.cast(side, kind, mini); // 法师施法 / 飞龙喷火
+battle.onBoom = (side, power) => audio.boom(power); // 法球 / 火球落地
 battle.onWhale = (side, usd) => (audio.whale(side), showBanner(T('whale', side === 'blue', fmtUsd(usd)), side, 2600, true));
 
 // ---------- 战力 & 刷新 ----------
