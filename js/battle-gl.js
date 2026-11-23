@@ -1,10 +1,10 @@
 // 战场动画 WebGL 版（PixiJS）：模拟逻辑完全沿用 battle.js 的 Battle（前线、兵力、炮弹、爆炸都由行情驱动），这里只负责绘制。绘制。
 // 奇幻战场：人族（蓝金，左）对兽族（红黑，右），步兵/弓兵/骑兵为手绘精灵；背景为手绘场景图（昼夜见 daynight.js），加载前/失败时用 fantasy-art.js 程序绘制。
 // PixiJS 按需动态加载；加载失败、WebGL 不可用或显卡上下文丢失时自动退回经典 Canvas 2D 版；?fx=classic 强制经典版。
-import { Battle, COL, colOf, clamp, lerp, rand, TAU, makeGlow, makeSmoke } from './battle.js?v=68a03bc3';
-import { t as tr } from './i18n.js?v=68a03bc3';
-import { drawSkyGround, drawFarLayer, drawNearLayer, drawForeground, towerTex } from './fantasy-art.js?v=68a03bc3';
-import { skyState, moonPhase, moonCanvas, moonLit, sunTex, raysTex, duskTex } from './daynight.js?v=68a03bc3';
+import { Battle, COL, colOf, clamp, lerp, rand, TAU, makeGlow, makeSmoke } from './battle.js?v=60a53bd5';
+import { t as tr } from './i18n.js?v=60a53bd5';
+import { drawSkyGround, drawFarLayer, drawNearLayer, drawForeground, towerTex } from './fantasy-art.js?v=60a53bd5';
+import { skyState, moonPhase, moonCanvas, moonLit, sunTex, raysTex, duskTex } from './daynight.js?v=60a53bd5';
 
 const ASSET_V = '6';
 // 手绘（ChatGPT）新素材：覆盖对应阵营的兵种；ONLY 表示该阵营暂时只显示这个兵种（其余兵种的新素材画好前，避免两种画风混在一起）
@@ -30,7 +30,7 @@ const QUALITY = { 2: { res: 2, parts: 600, stars: 110, rays2: 1, wash: 1, rays: 
   1: { res: 1.5, parts: 320, stars: 70, rays2: 0, wash: 0, rays: 1, vig: 1, tint: 1, march: 1 },
   0: { res: 1, parts: 160, stars: 40, rays2: 0, wash: 0, rays: 0, vig: 0, tint: 0, march: 0.5 } };
 const QPARAM = { low: 0, mid: 1, high: 2 }[new URLSearchParams(location.search).get('q')]; // 精灵像素 → 战场单位（sc=1 时）
-const PIXI_URL = './vendor/pixi.js?v=68a03bc3';
+const PIXI_URL = './vendor/pixi.js?v=60a53bd5';
 
 // ---------- 小工具 ----------
 function rng32(seed) { // 固定种子随机数：同一屏幕尺寸下背景每次生成都一样，窗口缩放时不会“换一座城”
@@ -199,7 +199,10 @@ export class GLBattle extends Battle {
     const img = (src) => new Promise((res, rej) => { const im = new Image(); im.decoding = 'async'; im.onload = () => (im.naturalWidth ? res(im) : rej(new Error('empty'))); im.onerror = rej; im.src = src; });
     const tryImg = async (name) => { for (const ext of ['webp', 'avif']) { try { return await img(`${base}${name}.${ext}?v=${ASSET_V}`); } catch {} } throw new Error('no image ' + name); };
     const addAtlas = (units, meta, im) => {
-      const source = P.Texture.from(im, true).source, [cw, ch] = meta.cell;
+      // 士兵在屏幕上只有图集的 1/4~1/8 大小：开 mipmap（多级缩小图），缩小时边缘才平滑、不出锯齿
+      const lv = Math.floor(Math.log2(Math.max(im.naturalWidth, im.naturalHeight))) + 1;
+      const source = P.Texture.from({ resource: im, autoGenerateMipmaps: true, mipLevelCount: lv, scaleMode: 'linear' }).source, [cw, ch] = meta.cell;
+      source.style.mipmapFilter = 'linear'; source.style.maxAnisotropy = 4;
       for (const [u, ud] of Object.entries(meta.units)) {
         const clips = {};
         for (const [k, c] of Object.entries(ud.clips)) clips[k] = { ...c, tex: Array.from({ length: c.n }, (_, i) => new P.Texture({ source, frame: new P.Rectangle(i * cw, c.row * ch, cw, ch) })) };
@@ -333,7 +336,7 @@ export class GLBattle extends Battle {
         const sh = pl.shadows.get(); sh.position.set(c.x, this.laneTop + 4 + clamp(c.y / this.horizon, 0, 1) * 12); sh.width = 70 * us; sh.height = 9 * us; sh.alpha = 0.22 * c.a;
       } else { const sh = pl.shadows.get(); sh.position.set(c.x, c.y); sh.width = 30 * this.scaleAt(c.y) * us; sh.height = 7 * this.scaleAt(c.y) * us; sh.alpha = 0.9 * c.a; }
       const sp = (blue ? pl.casters : pl.air).get(clip.tex[fi]); sp.anchor.set(U.ax, U.ay);
-      sp.position.set(c.x, c.y); sp.scale.set(K * face, K); sp.alpha = c.a; sp.tint = this.amb || 0xffffff;
+      sp.position.set(c.x, c.y); sp.scale.set(K * face, K); sp.alpha = c.a; sp.tint = this.uamb || 0xffffff;
       if (blue) { // 法杖宝石的微光
         const [gx, gy] = this._castPoint(c), g = pl.casterFx.get(tx.blue); g.position.set(gx, gy); const p = c.st === 'cast' ? 1.8 : 1;
         g.width = g.height = 26 * K / U.k * 0.4 * p; g.alpha = (0.5 + 0.2 * Math.sin(this.t * 5 + c.ph)) * c.a;
@@ -514,7 +517,10 @@ export class GLBattle extends Battle {
   }
 
   get Q() { return QUALITY[this.q]; }
-  _res() { return Math.min(window.devicePixelRatio || 1, QUALITY[this.q].res); }
+  _res() { // 手机画布小，中档也用 2 倍分辨率（填充量不大），保证人物边缘细腻
+    const small = (this.W || 400) * (this.H || 400) < 320000, r = this.q === 1 && small ? 2 : QUALITY[this.q].res;
+    return Math.min(window.devicePixelRatio || 1, r);
+  }
   draw() {
     if (!this.gl) return super.draw();
     if (!this.onScreen || document.hidden) { this._lastNow = performance.now(); this._lastFrame = 0; return; }
@@ -552,6 +558,7 @@ export class GLBattle extends Battle {
     const img = !!(this.bgTex && (this.bgTex.day || this.bgTex.night));
     const sky = img ? this._drawBgImg(cam, dt) : null, D = sky ? sky.D : 0;
     this.amb = sky ? sky.amb : 0xffffff; this.light = sky;
+    this.uamb = mixNum(0xffffff, this.amb, 0.18); // 人物只带一点环境色，任何时段都保持清晰明亮
     sp.bg.visible = sp.far.visible = sp.near.visible = sp.fg.visible = !img;
     sp.bg.position.set(-6, -6); sp.bg.width = W + 12; sp.bg.height = H + 12;
     // 天空火光：常态暗红，交战强度与总攻时更红（总攻时混入进攻方颜色）
@@ -632,7 +639,7 @@ export class GLBattle extends Battle {
         const u = pl.soldiers.get(clip.tex[fi]); u.anchor.set(U.ax, U.ay);
         u.position.set(s.x, s.y - bob); u.scale.set(K * face, K); u.alpha = fade;
         const depth = clamp((s.y - this.laneTop) / (this.laneBot - this.laneTop), 0, 1);
-        u.tint = mulNum(mixNum(0xb4b8c6, 0xffffff, depth), this.amb); // 远处稍暗，增加纵深；再乘上环境光（夜里偏蓝暗，晨昏偏暖）
+        u.tint = mulNum(mixNum(0xe4e6ec, 0xffffff, depth), this.uamb || 0xffffff); // 远处稍暗，增加纵深；再乘上环境光（夜里偏蓝暗，晨昏偏暖）
       } else {
       const sh = pl.shadows.get(); sh.position.set(s.x, s.y); sh.width = 18 * sc; sh.height = 6 * sc; sh.alpha = fade;
       const fr = tx.soldier[s.side];
@@ -784,7 +791,7 @@ export class GLBattle extends Battle {
   // 远处行军：人族小兵从城堡台阶口出来往左走出画面，兽族从魔塔脚下的城门出来往右走出画面（去后方列队，画面外）
   _drawMarch(dt, toScr, ss) {
     if (!this.units) return;
-    const M = this.marchers || (this.marchers = []), K0 = 0.24 * ss / 0.44, amb = mulNum(this.amb || 0xffffff, 0xe6e8ee);
+    const M = this.marchers || (this.marchers = []), K0 = 0.24 * ss / 0.44, amb = mulNum(this.uamb || 0xffffff, 0xeef0f4);
     const GATE = { blue: { x: 548, y: 429, to: -40, dir: -1 }, red: { x: 1150, y: 430, to: 1610, dir: 1 } };
     const pick = () => { const r = Math.random(); return r < 0.15 ? 'cav' : r < 0.35 ? 'arc' : 'inf'; };
     const mk = (side, x) => ({ side, x, ut: pick(), ph: rand(0, TAU), sp: rand(22, 30), dy: rand(1, 7), t: x == null ? 0 : 9 });
