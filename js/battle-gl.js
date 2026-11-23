@@ -1,10 +1,10 @@
 // 战场动画 WebGL 版（PixiJS）：模拟逻辑完全沿用 battle.js 的 Battle（前线、兵力、炮弹、爆炸都由行情驱动），这里只负责绘制。绘制。
 // 奇幻战场：人族（蓝金，左）对兽族（红黑，右），步兵/弓兵/骑兵为手绘精灵；背景为手绘场景图（昼夜见 daynight.js），加载前/失败时用 fantasy-art.js 程序绘制。
 // PixiJS 按需动态加载；加载失败、WebGL 不可用或显卡上下文丢失时自动退回经典 Canvas 2D 版；?fx=classic 强制经典版。
-import { Battle, COL, colOf, clamp, lerp, rand, TAU, makeGlow, makeSmoke } from './battle.js?v=47f7b634';
-import { t as tr } from './i18n.js?v=47f7b634';
-import { drawSkyGround, drawFarLayer, drawNearLayer, drawForeground, towerTex } from './fantasy-art.js?v=47f7b634';
-import { skyState, moonPhase, moonCanvas, moonLit, sunTex, raysTex, duskTex } from './daynight.js?v=47f7b634';
+import { Battle, COL, colOf, clamp, lerp, rand, TAU, makeGlow, makeSmoke } from './battle.js?v=f98c16c9';
+import { t as tr } from './i18n.js?v=f98c16c9';
+import { drawSkyGround, drawFarLayer, drawNearLayer, drawForeground, towerTex } from './fantasy-art.js?v=f98c16c9';
+import { skyState, moonPhase, moonCanvas, moonLit, sunTex, raysTex, duskTex } from './daynight.js?v=f98c16c9';
 
 const ASSET_V = '5';
 // 手绘（ChatGPT）新素材：覆盖对应阵营的兵种；ONLY 表示该阵营暂时只显示这个兵种（其余兵种的新素材画好前，避免两种画风混在一起）
@@ -15,7 +15,7 @@ const BG_V = '1'; // 背景图（assets/bg）版本号
 const BG_LIGHTS = [
   { x: 1424, y: 158, r: 70, c: 0xff5a1e, lava: 1 }, { x: 1395, y: 215, r: 38, c: 0xff6a24, lava: 1 }, { x: 1468, y: 222, r: 38, c: 0xff6a24, lava: 1 },
   { x: 1140, y: 90, r: 34, c: 0xffa040, eye: 1 }, { x: 1144, y: 220, r: 40, c: 0xff7a2a }, { x: 1060, y: 350, r: 60, c: 0xff5020 }, { x: 1300, y: 330, r: 60, c: 0xff5020 },
-  { x: 1480, y: 330, r: 55, c: 0xff5020 }, { x: 330, y: 200, r: 60, c: 0xffd48a, cas: 1 }, { x: 220, y: 280, r: 60, c: 0xffd48a, cas: 1 }, { x: 470, y: 300, r: 50, c: 0xffd48a, cas: 1 },
+  { x: 1480, y: 330, r: 55, c: 0xff5020 }, { x: 1150, y: 418, r: 34, c: 0xff5a20 }, { x: 548, y: 420, r: 26, c: 0xffd48a, cas: 1 }, { x: 330, y: 200, r: 60, c: 0xffd48a, cas: 1 }, { x: 220, y: 280, r: 60, c: 0xffd48a, cas: 1 }, { x: 470, y: 300, r: 50, c: 0xffd48a, cas: 1 },
 ];
 // 城堡上插的军旗（原图像素坐标：旗杆底部；第三个数是大小）
 const CASTLE_FLAGS = {
@@ -25,7 +25,7 @@ const CASTLE_FLAGS = {
 const mulNum = (a, b) => ((((a >> 16) * (b >> 16)) / 255) << 16) | (((((a >> 8) & 255) * ((b >> 8) & 255)) / 255) << 8) | (((a & 255) * (b & 255)) / 255);
 const loadImg = (src) => new Promise((res, rej) => { const im = new Image(); im.decoding = 'async'; im.onload = () => (im.naturalWidth ? res(im) : rej(new Error('empty'))); im.onerror = rej; im.src = src; });
 const UNIT_K = 0.42; // 精灵像素 → 战场单位（sc=1 时）
-const PIXI_URL = './vendor/pixi.js?v=47f7b634';
+const PIXI_URL = './vendor/pixi.js?v=f98c16c9';
 
 // ---------- 小工具 ----------
 function rng32(seed) { // 固定种子随机数：同一屏幕尺寸下背景每次生成都一样，窗口缩放时不会“换一座城”
@@ -403,7 +403,7 @@ export class GLBattle extends Battle {
     stage.addChild(world, screen);
     const L = this.L = {};
     const add = (name, parent = world) => (L[name] = C(), parent.addChild(L[name]), L[name]);
-    for (const n of ['bg', 'cel', 'ground', 'sky', 'clouds', 'far', 'flags', 'fires', 'rays', 'near', 'nearFires', 'bolts', 'fog', 'tint', 'craters', 'lights', 'bases', 'front', 'units', 'smoke', 'air', 'fg', 'wash', 'fx', 'debris', 'texts']) add(n);
+    for (const n of ['bg', 'cel', 'ground', 'sky', 'clouds', 'far', 'march', 'flags', 'fires', 'rays', 'near', 'nearFires', 'bolts', 'fog', 'tint', 'craters', 'lights', 'bases', 'front', 'units', 'smoke', 'air', 'fg', 'wash', 'fx', 'debris', 'texts']) add(n);
     const S = (tex, parent, blend) => { const s = new P.Sprite(tex); if (blend) s.blendMode = blend; parent.addChild(s); return s; };
     this.sp = {
       bg: S(P.Texture.EMPTY, L.bg), skyGlow: S(this.tx.skyGlow, L.sky, 'add'),
@@ -439,7 +439,7 @@ export class GLBattle extends Battle {
       shells: pool(L.fx, this.tx.white, 'add'), rings: pool(L.fx, this.tx.ring, 'add'), streaks: pool(L.fx, this.tx.fline, 'add'),
       embers: pool(L.fx, P.Texture.WHITE, 'add'), debris: pool(L.debris, P.Texture.WHITE),
       stars: this.bgs.stars, bgLights: pool(L.fires, this.tx.fire, 'add'),
-      casters: pool(L.units, P.Texture.EMPTY), casterFx: pool(L.units, this.tx.white, 'add'), air: pool(L.air, P.Texture.EMPTY), airFx: pool(L.air, this.tx.fire, 'add'),
+      march: pool(L.march, P.Texture.EMPTY), casters: pool(L.units, P.Texture.EMPTY), casterFx: pool(L.units, this.tx.white, 'add'), air: pool(L.air, P.Texture.EMPTY), airFx: pool(L.air, this.tx.fire, 'add'),
     };
     // 大本营塔楼与旗帜
     this.bases = {};
@@ -517,7 +517,7 @@ export class GLBattle extends Battle {
     const smokeK = 1 + this.surgeT * 0.9 + Math.min(this.intensity, 6) * 0.1; // 战况越激烈，硝烟越浓
 
     const img = !!(this.bgTex && (this.bgTex.day || this.bgTex.night));
-    const sky = img ? this._drawBgImg(cam) : null, D = sky ? sky.D : 0;
+    const sky = img ? this._drawBgImg(cam, dt) : null, D = sky ? sky.D : 0;
     this.amb = sky ? sky.amb : 0xffffff; this.light = sky;
     sp.bg.visible = sp.far.visible = sp.near.visible = sp.fg.visible = !img;
     sp.bg.position.set(-6, -6); sp.bg.width = W + 12; sp.bg.height = H + 12;
@@ -680,7 +680,7 @@ export class GLBattle extends Battle {
   }
 
   // 背景图 + 昼夜：返回光照信息（白天程度、环境光、光源位置、影子长度）
-  _drawBgImg(cam) {
+  _drawBgImg(cam, dt) {
     const { W, H, t } = this, hz = this.horizon, m = this.bgMeta, b = this.bgs, T = this.bgTex;
     const st = skyState();
     let D = st.D; if (!T.night) D = 1; if (!T.day) D = 0;
@@ -735,6 +735,7 @@ export class GLBattle extends Battle {
       g.position.set(x, y); g.width = g.height = L.r * 2 * ss * fl; g.alpha = a * fl; g.tint = L.c;
     }
     const [cx, cy] = toScr(1424, 150); this._crater = { x: cx, y: cy, s: ss };
+    this._drawMarch(dt, toScr, ss);
     this._flagPts = {}; for (const side in CASTLE_FLAGS) this._flagPts[side] = CASTLE_FLAGS[side].map(([x, y, k]) => [...toScr(x, y), k * ss / 0.44]);
     // 光照：光源（白天太阳、夜里月亮）的位置决定影子方向；晨昏时战场蒙上一层暖光
     const dayL = D >= 0.5, lx = dayL ? sx : mx, elev = dayL ? Math.max(0, st.alt) : Math.max(0, Math.sin(Math.PI * clamp(st.mq, 0, 1)));
@@ -742,6 +743,33 @@ export class GLBattle extends Battle {
     if (b.wash.visible) { b.wash.position.set(lx, hz); b.wash.width = W * 1.8; b.wash.height = H * 1.5; b.wash.tint = dayL ? 0xff9a50 : 0x5f7cff; b.wash.alpha = dayL ? warm * 0.3 * sunA : 0.07 * moonA * lit; }
     const amb = mixNum(0x8f9dca, mixNum(0xffffff, 0xffcfa0, warm), D);
     return { D, warm, amb, lx, shLen: 1.6 * (1 - elev), shA: dayL ? 1 : 0.55 };
+  }
+
+  // 远处行军：人族小兵从城堡台阶口出来往左走出画面，兽族从魔塔脚下的城门出来往右走出画面（去后方列队，画面外）
+  _drawMarch(dt, toScr, ss) {
+    if (!this.units) return;
+    const M = this.marchers || (this.marchers = []), K0 = 0.24 * ss / 0.44, amb = mulNum(this.amb || 0xffffff, 0xe6e8ee);
+    const GATE = { blue: { x: 548, y: 429, to: -40, dir: -1 }, red: { x: 1150, y: 430, to: 1610, dir: 1 } };
+    const pick = () => { const r = Math.random(); return r < 0.15 ? 'cav' : r < 0.35 ? 'arc' : 'inf'; };
+    const mk = (side, x) => ({ side, x, ut: pick(), ph: rand(0, TAU), sp: rand(22, 30), dy: rand(1, 7), t: x == null ? 0 : 9 });
+    this.marchT = this.marchT || { blue: 0, red: 0 };
+    if (!this._marchInit) { // 一开始就有一队人在路上
+      this._marchInit = true;
+      for (const side of ['blue', 'red']) { const g = GATE[side]; for (let i = 0; i < 12; i++) { const m = mk(side, lerp(g.x, g.to, Math.random() * 0.95)); M.push(m); } }
+    }
+    for (const side of ['blue', 'red']) {
+      if ((this.marchT[side] -= dt) <= 0) { const m = mk(side); m.x = GATE[side].x; M.push(m); this.marchT[side] = rand(0.7, 1.5) / (1 + Math.min(2, (this.activity[side] || 0) * 0.6)); }
+    }
+    for (const m of M) {
+      const g = GATE[m.side], A = this.units[m.side], U = A && A.units[m.ut]; if (!U) continue;
+      m.t += dt; m.x += g.dir * (m.ut === 'cav' ? m.sp * 1.6 : m.sp) * dt; m.ph += dt * (m.ut === 'cav' ? 12 : 9);
+      if ((g.dir < 0 && m.x < g.to) || (g.dir > 0 && m.x > g.to)) { m.done = true; continue; }
+      const clip = U.clips.walk || U.clips.idle, fi = ((((m.ph % TAU) + TAU) % TAU) / TAU * clip.n) | 0;
+      const [x, y] = toScr(m.x, g.y + m.dy * Math.min(1, m.t * 0.8)), K = (U.k || UNIT_K) * K0;
+      const sp = this.pl.march.get(clip.tex[fi]); sp.anchor.set(U.ax, U.ay); sp.position.set(x, y); sp.scale.set(K * g.dir, K);
+      sp.alpha = Math.min(1, m.t * 1.5); sp.tint = amb; // 刚出城门时渐渐显出
+    }
+    this.marchers = M.filter((m) => !m.done);
   }
 
   // 背景图模式：不画大本营塔楼，把双方军旗插在远处的城堡 / 要塞上

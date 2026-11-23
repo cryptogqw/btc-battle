@@ -1,4 +1,4 @@
-import { fetchJson, binFetch } from './net.js?v=47f7b634';
+import { fetchJson, binFetch } from './net.js?v=f98c16c9';
 // 币种宇宙：Binance（USDT 现货）为主，OKX（USDT 现货）、Coinbase（USD）补充；本地缓存 + 24h 行情排序
 const UKEY = 'cw_univ_v1', UTTL = 12 * 3600e3;
 const BIN_REST = ['https://api.binance.com', 'https://data-api.binance.vision'];
