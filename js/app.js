@@ -1,9 +1,10 @@
-import { FeedManager, SOURCES, fetchMiniTickers, fetchBinance1s, fetchBinanceAggTrades } from './feeds.js?v=328d3470';
-import { PRESET, universe, loadUniverse, loadTickers, fetchQuoteVolume, thresholdsFor, search as searchCoins, topByVolume, recents, pushRecent, favorites, toggleFav, primarySource } from './markets.js?v=328d3470';
-import { GLBattle } from './battle-gl.js?v=328d3470';
-import { t as T, lang, setLang, onLang, applyI18n, fmtUsd, fmtShort, fmtNum } from './i18n.js?v=328d3470';
-import { AudioController } from './music.js?v=328d3470';
-import { initChat } from './chat.js?v=328d3470';
+import { FeedManager, SOURCES, fetchMiniTickers, fetchBinance1s, fetchBinanceAggTrades } from './feeds.js?v=4315b376';
+import { PRESET, universe, loadUniverse, loadTickers, fetchQuoteVolume, thresholdsFor, search as searchCoins, topByVolume, recents, pushRecent, favorites, toggleFav, primarySource } from './markets.js?v=4315b376';
+import { GLBattle } from './battle-gl.js?v=4315b376';
+import { t as T, lang, setLang, onLang, applyI18n, fmtUsd, fmtShort, fmtNum } from './i18n.js?v=4315b376';
+import { AudioController } from './music.js?v=4315b376';
+import { skyState } from './daynight.js?v=4315b376';
+import { initChat } from './chat.js?v=4315b376';
 
 const $ = (id) => document.getElementById(id);
 const pad = (n) => String(n).padStart(2, '0');
@@ -69,7 +70,7 @@ function resetStats() {
   for (const x of S.px) { x.sec = 0; x.p = 0; } S.tickDir = 0;
   S.book = null; S.last = 0; S.shownStr = ''; S.open24h = 0; S.hi = 0;
   S.surge = null; S.wonFor = null; smoothS = 0;
-  S.since = 0; S.liveSec = null; S.bfGen++; S.nEma = 0;
+  S.since = 0; S.liveSec = null; S.bfGen++; S.nEma = 0; S.volEma = 0;
   $('price').textContent = '--'; $('chg').textContent = '--'; $('chg').className = 'chg';
   ['hi', 'lo', 'vol'].forEach(id => $(id).textContent = '--');
   S.big = []; S.bigFrom = 0; S.bigLoading = false; S.lastAggId = 0; pend = null; clearTimeout(pendTimer);
@@ -81,6 +82,17 @@ function bucket(sec) {
   return b;
 }
 // N 秒涨跌幅（%）：用 N 秒前（或最早可用的）每秒收盘价
+// 近 N 秒逐秒收益率的标准差（%），没成交的秒沿用上一秒价格；样本不足返回 0
+function realizedVol(secs) {
+  const now = Math.floor(Date.now() / 1000); let prev = 0, s = 0, c = 0;
+  for (let k = secs; k >= 1; k--) {
+    const x = S.px[(now - k) % 120], p = x.sec === now - k && x.p ? x.p : prev;
+    if (p && prev) { const r = (p / prev - 1) * 100; s += r * r; c++; }
+    if (p) prev = p;
+  }
+  return c >= secs * 0.5 ? Math.sqrt(s / c) : 0;
+}
+const smoothstep = (a, b, x) => { const k = Math.min(1, Math.max(0, (x - a) / (b - a))); return k * k * (3 - 2 * k); };
 function priceChange(secs) {
   if (!S.last) return 0;
   const now = Math.floor(Date.now() / 1000);
@@ -466,11 +478,29 @@ function showBanner(html, cls, ms = 2200, force = false) {
 }
 battle.onCast = (side, kind, mini) => audio.cast(side, kind, mini); // 法师施法 / 飞龙喷火
 battle.onBoom = (side, power) => audio.boom(power); // 法球 / 火球落地
+battle.onWeather = (ev, delay) => audio.weather(ev, delay); // 雷声、火山轰鸣、圣光钟声
 battle.onWhale = (side, usd) => (audio.whale(side), showBanner(T('whale', side === 'blue', fmtUsd(usd)), side, 2600, true));
 
 // ---------- 战力 & 刷新 ----------
 let smoothS = 0, musicI = 0.15, musicBpm = 80, musicMood = 0;
 const VICTORY_SEC = 20;
+// 天气提示：战场顶部中间的小标签，说明现在的天气对应什么行情
+const wxChip = $('wxChip');
+function updateWxChip(ratio, ch120) {
+  if (!wxChip) return;
+  if (camTog) camTog.hidden = !battle.gl;
+  if (!battle.gl) { wxChip.textContent = ''; wxChip.dataset.h = ''; return; } // 经典版不画天气
+  const v = battle.wxv || battle.wxT || {}, night = skyState().D < 0.5, pct = (ch120 >= 0 ? '+' : '') + ch120.toFixed(2) + '%';
+  let k = 'clear', d = T('wxCalm');
+  if ((v.blood || 0) > 0.4) { k = night ? 'blood' : 'bloodDay'; d = T('wxCh', pct); }
+  else if ((v.erupt || 0) > 0.4) { k = 'erupt'; d = T('wxCh', pct); }
+  else if ((v.glory || 0) > 0.4) { k = 'glory'; d = T('wxCh', pct); }
+  else if ((v.storm || 0) > 0.4) { k = 'storm'; d = T('wxVol', ratio.toFixed(1)); }
+  else if ((v.fog || 0) > 0.4) { k = 'fog'; d = T('wxQuiet'); }
+  else if (night) k = 'clearN';
+  const html = `${T('wx_' + k)}<small>${d}</small>`;
+  if (wxChip.dataset.h !== html) { wxChip.innerHTML = html; wxChip.dataset.h = html; wxChip.className = 'wx-chip wx-' + k; }
+}
 function refresh() {
   const C = M.base;
   const w10 = windowSum(10), w60 = windowSum(60), w300 = windowSum(300);
@@ -519,6 +549,20 @@ function refresh() {
   musicMood = 0.7 * (0.5 * p10 + 0.5 * p60) + 0.3 * smoothS;
   audio.update({ intensity: S.surge ? Math.max(musicI, 0.85) : musicI, bias: musicMood, surge: S.surge, bpm: S.surge ? Math.max(124, musicBpm) : musicBpm });
   updateMusicInd();
+  // ===== 天气（同样全部来自实时行情）=====
+  // 暴风雨 ← 近 1 分钟波动率是平时（约 15 分钟均值）的几倍；火山喷发 / 圣光 ← 近 1~2 分钟急跌 / 急涨，跌得更深 → 血月；
+  // 薄雾 ← 成交清淡；色调 ← 24h 涨跌
+  const vol = realizedVol(60);
+  if (vol > 0) S.volEma = S.volEma ? S.volEma + (vol - S.volEma) * 0.0005 : vol;
+  const volRatio = vol > 0 ? vol / Math.max(S.volEma || vol, 0.002 * k) : 1;
+  const ch120 = priceChange(115), mDir = 0.4 * Math.tanh(ch60 / (0.15 * k)) + 0.6 * Math.tanh(ch120 / (0.25 * k));
+  const ch24 = S.open24h && S.last ? (S.last / S.open24h - 1) * 100 : 0;
+  battle.setWeather({
+    storm: smoothstep(1.3, 2.4, volRatio), erupt: smoothstep(0.4, 0.75, -mDir), blood: smoothstep(0.8, 0.93, -mDir),
+    glory: smoothstep(0.4, 0.75, mDir), fog: cov >= 30 ? smoothstep(0.2, 0.06, act) : 0, tone: Math.tanh(ch24 / (3 * k)),
+  });
+  audio.rain(battle.wxv ? battle.wxv.storm : 0);
+  updateWxChip(volRatio, ch120);
   S.dbg = { musicI, musicBpm, musicMood, t: Date.now(), price: S.last, ch10, ch60, p10, p60, i10, i60, ib, raw, s: smoothS, front: battle.front, target: battle.frontTarget, actB: w10.bu / ref, actR: w10.su / ref, w10, w60, w300, coin, th: CF.th };
   const pc = (v) => `<b class="${v >= 0 ? 'c-blue' : 'c-red'}">${v >= 0 ? '+' : ''}${v.toFixed(3)}%</b>`;
   const rt = (v) => { const b = Math.round((v + 1) * 50); return `<b><span class="c-blue">${b}</span>:<span class="c-red">${100 - b}</span></b>`; };
@@ -565,6 +609,15 @@ const AKEY = 'cw_audio2'; // v2：默认开启（忽略旧版“默认关闭”�
 const AP = Object.assign({ music: true, sfx: true, vol: 75, muted: false }, JSON.parse(localStorage.getItem(AKEY) || '{}'));
 // 一键静音：只压住输出，不改动音乐/音效各自的开关，取消静音后恢复原设置
 const aMusic = () => AP.music && !AP.muted, aSfx = () => AP.sfx && !AP.muted;
+// 镜头：全景 / 跟随前线（记在本机）
+const camTog = $('camTog');
+let camFollow = false; try { camFollow = localStorage.getItem('cw_cam') === 'follow'; } catch {}
+function applyCam() {
+  battle.setCamFollow(camFollow);
+  if (camTog) { camTog.textContent = camFollow ? T('camFollow') : T('camWide'); camTog.setAttribute('aria-pressed', String(camFollow)); camTog.classList.toggle('on', camFollow); }
+}
+if (camTog) camTog.onclick = () => { camFollow = !camFollow; try { localStorage.setItem('cw_cam', camFollow ? 'follow' : 'wide'); } catch {} applyCam(); };
+applyCam(); onLang(applyCam);
 const sndTog = $('sndTog');
 const audioBtn = $('audioBtn'), pop = $('audioPop'), mInd = $('musicInd');
 $('musicTog').checked = AP.music; $('sfxTog').checked = AP.sfx; $('volRange').value = AP.vol;

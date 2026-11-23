@@ -258,6 +258,56 @@ export class WarMusic {
     const ng = c.createGain(); ng.gain.setValueAtTime(0.0001, t + 0.05); ng.gain.exponentialRampToValueAtTime(0.3 * vel, t + 0.18); ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.05 + dur);
     nz.connect(nb).connect(ng); this._out(ng, 'sfx', 0.3);
   }
+  // ---------- 天气音效 ----------
+  thunder(t = this.ctx.currentTime + 0.02, vel = 1) { // 炸雷：一声撕裂的脆响 + 拖长、起伏的低频滚雷
+    const c = this.ctx;
+    const cr = this._noiseSrc(t, 0.3), hp = c.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 1400;
+    const cg = c.createGain(); cg.gain.setValueAtTime(0.0001, t); cg.gain.exponentialRampToValueAtTime(0.22 * vel, t + 0.01); cg.gain.exponentialRampToValueAtTime(0.0001, t + 0.28);
+    cr.connect(hp).connect(cg); this._out(cg, 'sfx', 0.5);
+    const dur = 2.6 + Math.random(), rn = this._noiseSrc(t, dur), lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.setValueAtTime(320, t); lp.frequency.exponentialRampToValueAtTime(110, t + dur);
+    const rg = c.createGain(); rg.gain.setValueAtTime(0.0001, t);
+    let tt = t + 0.04; rg.gain.exponentialRampToValueAtTime(0.55 * vel, tt);
+    while (tt < t + dur - 0.4) { tt += 0.12 + Math.random() * 0.3; rg.gain.linearRampToValueAtTime((0.15 + Math.random() * 0.45) * vel * (1 - (tt - t) / dur), tt); } // 滚雷的起伏
+    rg.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    rn.connect(lp).connect(rg); this._out(rg, 'sfx', 0.6);
+    const o = c.createOscillator(); o.type = 'sine'; o.frequency.setValueAtTime(55, t); o.frequency.exponentialRampToValueAtTime(32, t + 1.8);
+    const og = c.createGain(); og.gain.setValueAtTime(0.0001, t); og.gain.exponentialRampToValueAtTime(0.3 * vel, t + 0.05); og.gain.exponentialRampToValueAtTime(0.0001, t + 1.9);
+    o.connect(og); o.start(t); o.stop(t + 2); this._out(og, 'sfx', 0.2);
+  }
+  setRain(level) { // 持续的雨声：循环噪声，音量随雨势慢慢变化
+    const c = this.ctx;
+    if (!this.rainG) {
+      if (level < 0.01) return;
+      const s = c.createBufferSource(); s.buffer = this.noise; s.loop = true;
+      const hp = c.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 700;
+      const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 5200;
+      this.rainG = c.createGain(); this.rainG.gain.value = 0;
+      s.connect(hp).connect(lp).connect(this.rainG); this._out(this.rainG, 'sfx', 0.15); s.start();
+    }
+    this.rainG.gain.setTargetAtTime(Math.min(1, level) * 0.08, c.currentTime, 1.2);
+  }
+  erupt(t = this.ctx.currentTime + 0.02) { // 火山喷发：大地深处的长时间轰鸣 + 爆裂 + 噼啪的火
+    const c = this.ctx, dur = 4.5;
+    const n = this._noiseSrc(t, dur), lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 130;
+    const g = c.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.7, t + 0.5); g.gain.setValueAtTime(0.6, t + 2); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    n.connect(lp).connect(g); this._out(g, 'sfx', 0.4);
+    const o = c.createOscillator(); o.type = 'sine'; o.frequency.setValueAtTime(38, t); o.frequency.linearRampToValueAtTime(30, t + dur);
+    const og = c.createGain(); og.gain.setValueAtTime(0.0001, t); og.gain.exponentialRampToValueAtTime(0.35, t + 0.6); og.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(og); o.start(t); o.stop(t + dur + 0.05); this._out(og, 'sfx', 0.2);
+    this.boom(4.5, t + 0.15); this._fireCrackle(t + 0.4, 3.2, 0.9);
+  }
+  bell(t = this.ctx.currentTime + 0.02) { // 圣光：城堡钟楼敲两下（钟声泛音）
+    const c = this.ctx, P = [[0.5, 0.5], [1, 1], [1.19, 0.55], [1.5, 0.4], [2, 0.5], [2.52, 0.25], [3, 0.18], [4.07, 0.1]];
+    for (const [dt, base, vel] of [[0, 329.6, 1], [1.15, 246.9, 0.85]]) {
+      const tt = t + dt;
+      for (const [r, a] of P) {
+        const o = c.createOscillator(); o.type = 'sine'; o.frequency.value = base * r;
+        const g = c.createGain(), d = 3.8 / Math.pow(r, 0.45);
+        g.gain.setValueAtTime(0.0001, tt); g.gain.exponentialRampToValueAtTime(0.07 * a * vel, tt + 0.006); g.gain.exponentialRampToValueAtTime(0.0001, tt + d);
+        o.connect(g); o.start(tt); o.stop(tt + d + 0.05); this._out(g, 'sfx', 0.8);
+      }
+    }
+  }
   boom(power = 1, t = this.ctx.currentTime + 0.01) { // 法球 / 火球落地爆炸（power 1~5.5）
     const c = this.ctx, k = clamp((power - 1) / 4, 0, 1.2);
     const nz = this._noiseSrc(t, 0.3 + k * 0.5), lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 900 - k * 400;
@@ -416,6 +466,15 @@ export class AudioController {
     if (side === 'blue') this.engine.spell(undefined, vel); else this.engine.roar(undefined, vel);
   }
   boom(power) { if (this._sfx && this._gate('boom', 90)) this.engine.boom(power); }
+  // 天气：雷声（闪电后延迟一会儿）、火山轰鸣、圣光钟声；雨声随雨势持续
+  weather(ev, delay = 0) {
+    if (!this._sfx) return;
+    const t = this.ctx.currentTime + 0.02 + (delay || 0), e = this.engine;
+    if (ev === 'thunder' && this._gate('thunder', 1500)) e.thunder(t, 0.6 + Math.random() * 0.4);
+    else if (ev === 'erupt' && this._gate('erupt', 20000)) e.erupt(t);
+    else if (ev === 'bell' && this._gate('bell', 20000)) e.bell(t);
+  }
+  rain(level) { if (this.engine) this.engine.setRain(this._sfx ? level : 0); }
   fanfare(side) { if (this.engine && this.engine.musicOn && this.running) this.engine.fanfare(side); }
   surge(side) { if (this.engine && this.engine.musicOn && this.running) this.engine.surgeHit(side); }
 }

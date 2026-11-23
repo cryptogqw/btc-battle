@@ -1,5 +1,5 @@
 // 战场动画：Canvas 2D，蓝军（多）在左，红军（空）在右
-import { t as tr, fmtUsd } from './i18n.js?v=328d3470';
+import { t as tr, fmtUsd } from './i18n.js?v=4315b376';
 const TAU = Math.PI * 2;
 const rand = (a, b) => a + Math.random() * (b - a);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -186,6 +186,10 @@ export class Battle {
   /** 每方近期真实主动成交活跃度（0=无成交，1≈常态，上限 2） */
   setActivity(blue, red) { this.activity.blue = clamp(blue, 0, 2); this.activity.red = clamp(red, 0, 2); }
   setThresholds(th) { Object.assign(this.th, th); }
+  /** 行情天气目标值（0~1）：storm 暴风雨 / erupt 火山喷发 / blood 血月 / glory 圣光 / fog 薄雾，tone 24h 色调（-1~1）。经典版不绘制 */
+  setWeather(w) { this.wxT = w; }
+  /** 镜头跟随前线（仅 WebGL 版） */
+  setCamFollow(on) { this.camFollow = !!on; }
   reset() {
     this.bullets = []; this.shells = []; this.parts = []; this.texts = []; this.queue = []; this.rings = [];
     this.pending = { blue: 0, red: 0 }; this.front = this.frontTarget = 0.5; this.surge = null;
