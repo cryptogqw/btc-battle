@@ -1,10 +1,10 @@
 // 战场动画 WebGL 版（PixiJS）：模拟逻辑完全沿用 battle.js 的 Battle（前线、兵力、炮弹、爆炸都由行情驱动），这里只负责绘制。绘制。
 // 奇幻战场：人族（蓝金，左）对兽族（红黑，右），步兵/弓兵/骑兵为手绘精灵；背景为手绘场景图（昼夜见 daynight.js），加载前/失败时用 fantasy-art.js 程序绘制。
 // PixiJS 按需动态加载；加载失败、WebGL 不可用或显卡上下文丢失时自动退回经典 Canvas 2D 版；?fx=classic 强制经典版。
-import { Battle, COL, colOf, clamp, lerp, rand, TAU, makeGlow, makeSmoke } from './battle.js?v=cee31399';
-import { t as tr } from './i18n.js?v=cee31399';
-import { drawSkyGround, drawFarLayer, drawNearLayer, drawForeground, towerTex } from './fantasy-art.js?v=cee31399';
-import { skyState, moonPhase, moonCanvas, moonLit, sunTex, raysTex, duskTex } from './daynight.js?v=cee31399';
+import { Battle, COL, colOf, clamp, lerp, rand, TAU, makeGlow, makeSmoke } from './battle.js?v=47f7b634';
+import { t as tr } from './i18n.js?v=47f7b634';
+import { drawSkyGround, drawFarLayer, drawNearLayer, drawForeground, towerTex } from './fantasy-art.js?v=47f7b634';
+import { skyState, moonPhase, moonCanvas, moonLit, sunTex, raysTex, duskTex } from './daynight.js?v=47f7b634';
 
 const ASSET_V = '5';
 // 手绘（ChatGPT）新素材：覆盖对应阵营的兵种；ONLY 表示该阵营暂时只显示这个兵种（其余兵种的新素材画好前，避免两种画风混在一起）
@@ -17,10 +17,15 @@ const BG_LIGHTS = [
   { x: 1140, y: 90, r: 34, c: 0xffa040, eye: 1 }, { x: 1144, y: 220, r: 40, c: 0xff7a2a }, { x: 1060, y: 350, r: 60, c: 0xff5020 }, { x: 1300, y: 330, r: 60, c: 0xff5020 },
   { x: 1480, y: 330, r: 55, c: 0xff5020 }, { x: 330, y: 200, r: 60, c: 0xffd48a, cas: 1 }, { x: 220, y: 280, r: 60, c: 0xffd48a, cas: 1 }, { x: 470, y: 300, r: 50, c: 0xffd48a, cas: 1 },
 ];
+// 城堡上插的军旗（原图像素坐标：旗杆底部；第三个数是大小）
+const CASTLE_FLAGS = {
+  blue: [[168, 200, 0.8], [442, 150, 1], [497, 217, 0.8], [590, 248, 0.75]],
+  red: [[1145, 186, 1], [1055, 224, 0.85], [1270, 254, 0.8], [1490, 304, 0.75]],
+};
 const mulNum = (a, b) => ((((a >> 16) * (b >> 16)) / 255) << 16) | (((((a >> 8) & 255) * ((b >> 8) & 255)) / 255) << 8) | (((a & 255) * (b & 255)) / 255);
 const loadImg = (src) => new Promise((res, rej) => { const im = new Image(); im.decoding = 'async'; im.onload = () => (im.naturalWidth ? res(im) : rej(new Error('empty'))); im.onerror = rej; im.src = src; });
 const UNIT_K = 0.42; // 精灵像素 → 战场单位（sc=1 时）
-const PIXI_URL = './vendor/pixi.js?v=cee31399';
+const PIXI_URL = './vendor/pixi.js?v=47f7b634';
 
 // ---------- 小工具 ----------
 function rng32(seed) { // 固定种子随机数：同一屏幕尺寸下背景每次生成都一样，窗口缩放时不会“换一座城”
@@ -398,7 +403,7 @@ export class GLBattle extends Battle {
     stage.addChild(world, screen);
     const L = this.L = {};
     const add = (name, parent = world) => (L[name] = C(), parent.addChild(L[name]), L[name]);
-    for (const n of ['bg', 'cel', 'ground', 'sky', 'clouds', 'far', 'fires', 'rays', 'near', 'nearFires', 'bolts', 'fog', 'tint', 'craters', 'lights', 'bases', 'front', 'units', 'smoke', 'air', 'fg', 'wash', 'fx', 'debris', 'texts']) add(n);
+    for (const n of ['bg', 'cel', 'ground', 'sky', 'clouds', 'far', 'flags', 'fires', 'rays', 'near', 'nearFires', 'bolts', 'fog', 'tint', 'craters', 'lights', 'bases', 'front', 'units', 'smoke', 'air', 'fg', 'wash', 'fx', 'debris', 'texts']) add(n);
     const S = (tex, parent, blend) => { const s = new P.Sprite(tex); if (blend) s.blendMode = blend; parent.addChild(s); return s; };
     this.sp = {
       bg: S(P.Texture.EMPTY, L.bg), skyGlow: S(this.tx.skyGlow, L.sky, 'add'),
@@ -730,6 +735,7 @@ export class GLBattle extends Battle {
       g.position.set(x, y); g.width = g.height = L.r * 2 * ss * fl; g.alpha = a * fl; g.tint = L.c;
     }
     const [cx, cy] = toScr(1424, 150); this._crater = { x: cx, y: cy, s: ss };
+    this._flagPts = {}; for (const side in CASTLE_FLAGS) this._flagPts[side] = CASTLE_FLAGS[side].map(([x, y, k]) => [...toScr(x, y), k * ss / 0.44]);
     // 光照：光源（白天太阳、夜里月亮）的位置决定影子方向；晨昏时战场蒙上一层暖光
     const dayL = D >= 0.5, lx = dayL ? sx : mx, elev = dayL ? Math.max(0, st.alt) : Math.max(0, Math.sin(Math.PI * clamp(st.mq, 0, 1)));
     b.wash.visible = (dayL ? warm : 0.4) * (dayL ? sunA : moonA) > 0.02;
@@ -738,8 +744,37 @@ export class GLBattle extends Battle {
     return { D, warm, amb, lx, shLen: 1.6 * (1 - elev), shA: dayL ? 1 : 0.55 };
   }
 
+  // 背景图模式：不画大本营塔楼，把双方军旗插在远处的城堡 / 要塞上
+  _drawCastleFlags(t) {
+    const P = this.P;
+    if (!this.cflags) {
+      this.cflags = {};
+      for (const side in CASTLE_FLAGS) this.cflags[side] = CASTLE_FLAGS[side].map(() => {
+        const o = { mast: new P.Graphics(), flag: new P.Graphics(), label: new P.Text({ text: '', style: { fontFamily: '-apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif', fontSize: 30, fontWeight: '900', fill: '#ffffff' } }) };
+        o.label.anchor.set(0.5); this.L.flags.addChild(o.mast, o.flag, o.label); return o;
+      });
+    }
+    for (const side in this.cflags) {
+      const blue = side === 'blue', dir = blue ? 1 : -1, lab = blue ? tr('flagL') : tr('flagS'), pts = this._flagPts[side];
+      this.cflags[side].forEach((o, i) => {
+        const [x, y, k] = pts[i], ph = i * 1.7, ph2 = blue ? 0 : 0.8, pole = 26 * k, fw = 30 * k, fh = 20 * k, top = y - pole, amb = this.amb || 0xffffff;
+        o.mast.clear().moveTo(x, y).lineTo(x, top).stroke({ width: Math.max(1, 1.8 * k), color: blue ? 0xe2c27a : 0x2a1a1a });
+        const ptsF = [];
+        for (let j = 0; j <= 10; j++) { const q = j / 10; ptsF.push(x + dir * fw * q, top + 2 + Math.sin(t * 5 - q * 4 + ph + ph2) * 2.4 * k * q); }
+        for (let j = 10; j >= 0; j--) { const q = j / 10; ptsF.push(x + dir * fw * q, top + 2 + fh + Math.sin(t * 5 - q * 4 + ph + ph2) * 2.4 * k * q); }
+        o.flag.clear().poly(ptsF).fill({ color: blue ? 0x1e4fd8 : 0xa01510 }).stroke({ width: Math.max(1, 1.3 * k), color: blue ? 0xe8b83c : 0x111111 });
+        o.mast.tint = o.flag.tint = o.label.tint = amb;
+        if (o.label.text !== lab) o.label.text = lab;
+        o.label.scale.set(0.42 * k); o.label.position.set(x + dir * fw * 0.5, top + 2 + fh / 2 + Math.sin(t * 5 - 2 + ph + ph2) * 1.2 * k);
+      });
+    }
+  }
+
   _drawBasesGL(t) {
     const { H, pl, tx } = this;
+    const img = !!this._flagPts;
+    for (const side of ['blue', 'red']) { const b = this.bases[side]; b.body.visible = b.mast.visible = b.flag.visible = b.label.visible = !img; }
+    if (img) return this._drawCastleFlags(t);
     const by = H * 0.66;
     for (const side of ['blue', 'red']) {
       const b = this.bases[side], m = b.meta, blue = side === 'blue', dir = blue ? 1 : -1, x = blue ? this.baseL : this.baseR, c = colOf(side);
